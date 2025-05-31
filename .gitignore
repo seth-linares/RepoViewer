@@ -1,32 +1,30 @@
-# Prerequisites
-*.d
+# Rust build
+/target/
+**/*.rs.bk
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Cargo package files
+Cargo.lock
 
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
+# Executables (Linux, Windows)
+*.exe
+*.exe~
+*.dll
 *.so
 *.dylib
-*.dll
 
-# Fortran module files
-*.mod
-*.smod
+# By-products of rustup
+.rustup/
+.cargo/
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Executables
-*.exe
-*.out
-*.app
+# Misc
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
