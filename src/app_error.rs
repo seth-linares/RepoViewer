@@ -1,6 +1,6 @@
 // src/app_error.rs
 
-use std::{fmt::format, io, path::Path};
+use std::{io, path::Path};
 use thiserror::Error;
 
 
@@ -61,15 +61,14 @@ pub enum AppError {
 impl AppError {
     // meant to work with fs and the paths/files we analyze there
     // Essentially we are overriding the io errors and making a custom print out via `io_err`
-    // we just tack on the original io_error along with path info
-    pub fn with_path_context(mut self, path: &Path) -> Self {
-        if let AppError::Io(ref mut io_err) = self {
-            *io_err = std::io::Error::new(
+    pub fn with_path_context(self, path: &Path) -> Self {
+        if let AppError::Io(io_err) = self {
+            AppError::Io(std::io::Error::new(
                 io_err.kind(),
-                format!("{} (path: {})", io_err, path.display())
-            );
+                format!("{} (path: {})", io_err, path.display()),
+            ))
+        } else {
+            self
         }
-
-        self
     }
 }
