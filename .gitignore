@@ -1,5 +1,5 @@
 # Rust build
-/target/
+target/
 **/*.rs.bk
 
 # Cargo package files
