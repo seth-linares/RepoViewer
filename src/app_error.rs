@@ -23,6 +23,9 @@ pub enum AppError {
     #[error("Ignore pattern error: {0}")]
     Ignore(#[from] ignore::Error),
 
+    #[error("Clipboard error: {0}")]
+    Clipboard(#[from] arboard::Error),
+
     // --- Application-specific errors ---
 
     /// Invalid path provided or determined
