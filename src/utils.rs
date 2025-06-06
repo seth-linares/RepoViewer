@@ -19,14 +19,14 @@ static FILE_MAPPINGS: LazyLock<HashMap<&'static str, (&'static str, Color)>> = L
             $( // Start of repetition group - this whole thing can repeat
                 $icon:expr,     // Capture an expression, call it $icon
                 $color:expr     // Capture an expression, call it $color
-                => 
+                =>              // Literal `=>`
                 [ // Literal bracket - must appear in input
                     $($ext:expr),+ // Another repetition: one or more expressions separated by commas
                 ] // Literal closing bracket
             );* // End repetition group - can repeat zero or more times, separated by semicolons
             $(;)? // Optional trailing semicolon
         ) => {
-            // CODE GENERATION SECTION (what gets output)
+            // What actually gets outputted
             $( // For each outer repetition (each icon/color group)
                 $( // For each inner repetition (each extension in the brackets)
                     map.insert($ext, ($icon, $color)); // Generate this line
@@ -220,15 +220,6 @@ pub fn get_file_display_info(item: &FileItem) -> (&str, Style) {
     (icon, style)
 }
 
-// fn get_file_color(name: &str) -> Style {
-//     let color = FILE_MAPPINGS
-//         .get(name.split('.').last().unwrap_or(""))
-//         .map(|(_, color)| *color)
-//         .unwrap_or(Color::Gray);
-
-
-//     Style::default().fg(color)
-// }
 
 /*
     ---------
