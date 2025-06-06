@@ -1,26 +1,35 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{fs::{self}, path::{Path, PathBuf}, time::{Duration, Instant}};
 
 use git2::Repository;
 use ignore::gitignore::Gitignore;
 use ratatui::widgets::ListState;
-use tui_input::Input;
 
 use crate::app_error::AppError;
 
+/// Represents a UI message with optional timeout
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub text: String,
+    pub created_at: Instant,
+    pub timeout: Duration,
+    pub success: bool,
+}
+
 /// Main application state
+#[derive(Clone)]
 pub struct App {
     pub current_dir: PathBuf,
     pub git_root: Option<PathBuf>,
     pub items: Vec<FileItem>,
     pub state: ListState,
-    pub input: Input,
     pub gitignore: Option<Gitignore>,
     pub show_hidden: bool,
     pub show_gitignored: bool,
+    pub message: Option<Message>,
 }
 
 /// Represents a file system entry
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileItem {
     pub path: PathBuf,
     pub name: String,
@@ -32,6 +41,7 @@ pub struct FileItem {
 
 impl App {
     pub fn new(start_dir: PathBuf) -> Result<Self, AppError> {
+        // Try to see if there's a repo where we're looking
         let (git_root, gitignore) = match Repository::discover(&start_dir) {
             Ok(repo) => {
                 let root = repo.workdir()
@@ -39,105 +49,96 @@ impl App {
                     .map(|p| p.to_path_buf())
                     .ok_or(AppError::GitRepoNoParent)?;
             
-                // Handle gitignore errors gracefully
+                // Handle gitignore errors
                 let (gitignore, err) = Gitignore::new(root.join(".gitignore"));
                 if let Some(err) = err {
                     return Err(err.into());
                 }
 
+                // Get back the possible root and gitignore
                 (Some(root), Some(gitignore))
 
             },
+
             Err(_) => (None, None),
         };
 
+        // Create app struct to be filled in and returned
         let mut app = App {
             current_dir: start_dir,
             git_root,
             items: Vec::new(),
             state: ListState::default(),
-            input: Input::default(),
             gitignore,
             show_hidden: false,
             show_gitignored: false,
+            message: None,
             
         };
 
+        // populate app 
         app.refresh_files()?;
 
         Ok(app)
     }
 
     pub fn refresh_files(&mut self) -> Result<(), AppError>{
-        // Clear items out
+        // Clear items out of our items vec to reset
         self.items.clear();
 
-        let entries = fs::read_dir(&self.current_dir)
+        // Unwrap the result into the ReadDir iter and use the fancy error handling if it throws
+        self.items = fs::read_dir(&self.current_dir)
             .map_err(|e| AppError::Io(e)
-            .with_path_context(&self.current_dir))?;
+            .with_path_context(&self.current_dir))?
+            // We want to filter_map() because we need to exclude some entries (e.g. `.git`) but we also want to create FileItem's
+            .filter_map(|entry_result| {  
+                // get the entry by converting from result to option (errors = None) and then unwrapping via `?` 
+                let entry = entry_result.ok()?;
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
 
-        for entry_result in entries {
-            let entry = entry_result?;
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
+                // Get rid of `.git` since it's just git metadata anyways 
+                // Check if this is a file that is hidden or ignored while those are meant to be hidden
+                if name == ".git" && !self.should_include_file(&path, &name, path.is_dir()) {
+                    return None;
+                }
 
-            // Skip over the `.git` dir since it's just git metadata
-            if name == ".git" && path.is_dir() {
-                continue;
-            }
+                // Now we "map" and transform our entry results into FileItem's
+                Some(FileItem {
+                    path: path.clone(),
+                    name: name.clone(),
+                    is_dir: path.is_dir(),
+                    is_symlink: path.is_symlink(),
+                    is_hidden: self.is_hidden(&path, &name)
+                })
 
+            })
+            .collect::<Vec<FileItem>>(); // and now we collect into our self.items vec
 
-            // Check if file should be included based on settings
-            if self.should_include_file(&path, &name) {
-                let metadata = entry.metadata()?;
-                let is_dir = metadata.is_dir();
-                let is_symlink = metadata.is_symlink();
-                let is_hidden = self.is_hidden(&path, &name);
-
-                self.items.push(FileItem { 
-                    path, 
-                    name, 
-                    is_dir, 
-                    is_symlink, 
-                    is_hidden, 
-                });
-            }
-        }
-
-        // Sort - directories > file or alphabetically
+        // We still need to do sorting though
         self.items.sort_by(|a, b| {
-            if a.is_dir && !b.is_dir {
-                std::cmp::Ordering::Less
-            } 
-            else if !a.is_dir && b.is_dir {
-                std::cmp::Ordering::Greater
-            }
-            else {
-                a.name.cmp(&b.name)
+            match(a.is_dir, b.is_dir) {
+                (true, false) => std::cmp::Ordering::Less,    // a is ABOVE b
+                (false, true) => std::cmp::Ordering::Greater, // a is BELOW b
+                _ => a.name.cmp(&b.name),                     // alphanumeric sort
             }
         });
 
-        // Reset selection to the top
-        if !self.items.is_empty() {
-            self.state.select(Some(0));
-        }
-        else {
-            self.state.select(None);
-        }
-            
-
+        // Reset to the first item
+        self.state.select_first();
+    
        Ok(())
     }
 
-
-    fn should_include_file(&self, path: &Path, name: &str) -> bool {
-
+    /// Determine if we should include the files based on hidden and gitignore status
+    fn should_include_file(&self, path: &Path, name: &str, is_dir: bool) -> bool {
         if self.is_hidden(path, name) && !self.show_hidden {
             return false;
         }
 
         if let Some(ignore) = &self.gitignore {
-            match ignore.matched(path, false) {
+
+            match ignore.matched(path, is_dir) {
                 ignore::Match::Ignore(_) if !self.show_gitignored => return false,
                 ignore::Match::Whitelist(_) => return true,
                 _ => {}
@@ -145,7 +146,6 @@ impl App {
         }
 
         true
-
     }
 
     /// Check if a file is hidden (different on Windows than Linux)
@@ -163,7 +163,7 @@ impl App {
             }
         }
 
-        // else and for linux/unix we can just check for the `.` prefix
+        // -- else AND for linux/unix we can just check for the `.` prefix 
         name.starts_with('.')
     }
 
@@ -198,6 +198,136 @@ impl App {
         Ok(())
     }
 
+
+    /// Generate a tree structure string of the current directory
+    pub fn generate_tree(&self, max_depth: Option<usize>) -> Result<String, AppError> {
+        let mut output = String::new();
+        // Print out the current dir we're in as the top line (absolute path)
+        output.push_str(&format!("{}\n", self.current_dir.display()));
+        // Now we gen the tree structure and chill
+        self.generate_tree_recursive(&self.current_dir, &mut output, "", 0, max_depth)?;
+
+        Ok(output)
+    }
+
+    fn generate_tree_recursive(
+        &self,
+        dir: &Path,
+        output: &mut String,
+        prefix: &str, 
+        depth: usize,
+        max_depth: Option<usize>,
+    ) -> Result<(), AppError> {
+
+        // if we hit the depth then return
+        if let Some(max) = max_depth {
+            if depth >= max {
+                return Ok(());
+            }
+        }
+
+        // Since we are using recursion we will need to update our entries as we go through the tree -- no need to 
+        let mut entries = fs::read_dir(dir)?
+            .filter_map(|entry_result| entry_result.ok())
+            .filter(|entry| {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                name != ".git" && self.should_include_file(&path, &name, path.is_dir())
+            })
+            .collect::<Vec<fs::DirEntry>>();
+
+        // Sort entries: directories first (false < true due to `!`), then alphanumerically by name.
+        entries.sort_by_key(|entry| (!entry.path().is_dir(), entry.file_name()));
+
+        let total_entries = entries.len();
+
+        // Now we need to go through and draw out the items as well as thei tree visualization 
+        for (i, entries) in entries.iter().enumerate() {
+            let is_last_entry = total_entries - 1 == i;
+            let path = entries.path();
+            let name = entries.file_name().to_string_lossy().to_string();
+
+            // Tree drawing characters
+            let connector = if is_last_entry { "└── " } else { "├── " };
+            let extension = if is_last_entry { "    " } else { "│   " };
+
+            output.push_str(prefix);
+            output.push_str(connector);
+
+            if path.is_dir() {
+                output.push_str(&name);
+                output.push('/');
+                output.push('\n');
+
+                // Recurse into subdirectory
+                let new_prefix = format!("{}{}", prefix, extension);
+                self.generate_tree_recursive(
+                    &path, 
+                    output, 
+                    &new_prefix, 
+                    depth + 1, 
+                    max_depth
+                )?;
+            }
+            else {
+                output.push_str(&name);
+                output.push('\n');
+            }
+        }
+
+        
+        Ok(())
+    }
+
+    /// Copy tree to clipboard (requires clipboard feature)
+    #[cfg(feature = "clipboard")]
+    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
+        use arboard::Clipboard;
+
+        let tree = self.generate_tree(None)?;
+        
+        Clipboard::new()?
+            .set_text(tree)?;
+
+        Ok(())
+    }
+
+    /// In case the feature is disabled
+    #[cfg(not(feature = "clipboard"))]
+    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
+        Err(AppError::UnsupportedOperation(
+            "Clipboard support not compiled. Use --features clipboard".to_string(),
+        ))
+    }
+
+    /// Set a success message that will disappear after a timeout
+    pub fn set_success_message(&mut self, text: String) {
+        self.message = Some(Message {
+            text,
+            created_at: Instant::now(),
+            timeout: Duration::from_secs(3), // 3 seconds timeout
+            success: true,
+        });
+    }
+
+    /// Set an error message that will disappear after a timeout
+    pub fn set_error_message(&mut self, text: String) {
+        self.message = Some(Message {
+            text,
+            created_at: Instant::now(),
+            timeout: Duration::from_secs(3), // 3 seconds timeout
+            success: false,
+        });
+    }
+
+    /// Check if current message has timed out and clear it if needed
+    pub fn update_message(&mut self) {
+        if let Some(message) = &self.message {
+            if message.created_at.elapsed() >= message.timeout {
+                self.message = None;
+            }
+        }
+    }
     
 }
 
