@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::app::FileItem;
@@ -11,7 +12,7 @@ use crate::app_error::AppError;
 */
 
 static FILE_MAPPINGS: LazyLock<HashMap<&'static str, (&'static str, Color)>> = LazyLock::new(|| {
-    let mut map = HashMap::new();
+    let mut file_mappings = HashMap::new();
     
     macro_rules! file_types {
         // PATTERN MATCHING SECTION (what the macro expects as input)
@@ -29,7 +30,7 @@ static FILE_MAPPINGS: LazyLock<HashMap<&'static str, (&'static str, Color)>> = L
             // What actually gets outputted
             $( // For each outer repetition (each icon/color group)
                 $( // For each inner repetition (each extension in the brackets)
-                    map.insert($ext, ($icon, $color)); // Generate this line
+                    file_mappings.insert($ext, ($icon, $color)); // Generate this line
                 )+ // End inner repetition (matches the + from input pattern)
             )* // End outer repetition (matches the * from input pattern)
         };
@@ -189,7 +190,7 @@ static FILE_MAPPINGS: LazyLock<HashMap<&'static str, (&'static str, Color)>> = L
         "🔌", Color::Cyan => ["socket", "sock"];
     }
 
-    map
+    file_mappings
 });
 
 
@@ -252,7 +253,187 @@ pub fn parse_target_dir(path_arg: Option<String>) -> Result<PathBuf, AppError> {
     }
 }
 
+/*
+    ---FILE READING UTIL---
+*/
 
 
 
+static TEXT_FILE_MAPPINGS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    
+    // NOTE: All keys in this map should be lowercase. The lookup logic will lowercase
+    // the input filename/extension before checking the map.
 
+    macro_rules! text_types {
+        (
+            $(
+                $lang:expr => [$($ext:expr),+]
+            );*
+            $(;)?
+        ) => {
+            $(
+                $(
+                    map.insert($ext, $lang);
+                )+
+            )*
+        };
+    }
+    
+    text_types! {
+        // --- Filetype by Extension ---
+
+        // Programming Languages
+        "rust" => ["rs"];
+        "python" => ["py", "pyw", "pyi"];
+        "javascript" => ["js", "mjs", "cjs"];
+        "typescript" => ["ts", "tsx"];
+        "jsx" => ["jsx"];
+        "java" => ["java"];
+        "cpp" => ["cpp", "c++", "cxx", "cc", "hpp", "h++", "hxx", "h"];
+        "c" => ["c"];
+        "csharp" => ["cs", "csx"];
+        "go" => ["go"];
+        "swift" => ["swift"];
+        "kotlin" => ["kt", "kts"];
+        "scala" => ["scala", "sc"];
+        "ruby" => ["rb", "rbw", "rake", "gemspec"];
+        "php" => ["php", "php3", "php4", "php5", "phtml"];
+        "perl" => ["pl", "pm", "pod"];
+        "lua" => ["lua"];
+        "r" => ["r", "rmd"];
+        "julia" => ["jl"];
+        "dart" => ["dart"];
+        "haskell" => ["hs", "lhs"];
+        "clojure" => ["clj", "cljs", "cljc", "edn"];
+        "elixir" => ["ex", "exs"];
+        "erlang" => ["erl", "hrl"];
+        "ocaml" => ["ml", "mli"];
+        "fsharp" => ["fs", "fsx", "fsi"];
+        "nim" => ["nim", "nims"];
+        "zig" => ["zig"];
+        "crystal" => ["cr"];
+        "v" => ["v"];
+        "solidity" => ["sol"];
+        
+        // Web Technologies
+        "html" => ["html", "htm", "xhtml"];
+        "css" => ["css"];
+        "scss" => ["scss", "sass"];
+        "less" => ["less"];
+        "vue" => ["vue"];
+        "svelte" => ["svelte"];
+        "astro" => ["astro"];
+        
+        // Shell & Scripts
+        "bash" => ["sh", "bash", "zsh", "fish", "ksh", "csh"];
+        "powershell" => ["ps1", "psm1", "psd1"];
+        "batch" => ["bat", "cmd"];
+        
+        // Config/Data formats
+        "json" => ["json", "jsonc", "json5"];
+        "yaml" => ["yaml", "yml"];
+        "toml" => ["toml"];
+        "xml" => ["xml", "xsd", "xsl", "xslt", "svg"];
+        "ini" => ["ini", "cfg", "conf", "config"];
+        "kdl" => ["kdl"];
+        "properties" => ["properties", "props"];
+        "graphql" => ["graphql", "gql"];
+        "protobuf" => ["proto"];
+        
+        // Markup and Documentation
+        "markdown" => ["md", "markdown", "mdown", "mdx"];
+        "restructuredtext" => ["rst", "rest"];
+        "asciidoc" => ["adoc", "asciidoc", "asc"];
+        "latex" => ["tex", "latex", "ltx"];
+        "org" => ["org"];
+        
+        // Build & Infra
+        "gradle" => ["gradle", "gradle.kts"];
+        "maven" => ["pom"];
+        "terraform" => ["tf", "tfvars"];
+        "hcl" => ["hcl"];
+        
+        // Database
+        "sql" => ["sql", "psql", "mysql"];
+        
+        // Other
+        "diff" => ["diff", "patch"];
+        "plaintext" => ["txt", "text", "log", "logs", "out", "csv", "tsv", "lock"];
+
+
+        // --- Filetype by Full Filename (case-insensitive) ---
+
+        // Build/Project Files
+        "makefile" => ["makefile", "mk", "mak"]; // "Makefile" will be lowercased to "makefile"
+        "cmake" => ["cmakelists.txt", "cmake"];
+        "dockerfile" => ["dockerfile", "containerfile"];
+        "go" => ["go.mod", "go.sum"];
+        
+        // Common Documentation (all lowercase)
+        "plaintext" => [
+            "license", "licence", "readme", "changelog", "authors", 
+            "contributors", "todo", "notes"
+        ];
+        
+        // Common Config Files (including dotfiles, which are full filenames)
+        "plaintext" => [
+            // Git
+            ".gitignore", ".gitattributes", ".gitmodules", ".gitkeep",
+            // Docker, NPM, ESLint
+            ".dockerignore", ".npmignore", ".eslintignore",
+            // Environment variables
+            ".env", ".env.example", ".env.sample",
+            // Editor/Tooling Config
+            ".editorconfig", ".prettierrc", ".eslintrc", ".babelrc",
+            // Version managers
+            ".nvmrc", ".rvmrc", "ruby-version", "node-version"
+        ];
+    }
+    
+    map
+});
+
+
+pub fn get_file_type(path: &Path) -> Option<&'static str> {
+
+    // Check if the filename is in our whitelist and return the corresponding md lang code
+    if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+        if let Some(lang) = TEXT_FILE_MAPPINGS.get(filename.to_lowercase().as_str()) {
+            return Some(lang);
+        }
+    }
+    
+    // Do the same for extensions
+    if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
+        if let Some(lang) = TEXT_FILE_MAPPINGS.get(extension.to_lowercase().as_str()) {
+            return Some(lang);
+        }
+    }
+
+    
+    
+    
+    // defaults to `None` if we can't find matches
+    None
+}
+
+pub fn read_file_safely(path: &Path, max_size: usize) -> Result<Option<String>, AppError> {
+
+    // Make sure the file is even worth checking and in our whitelist!
+    if get_file_type(path).is_none() {
+        return Ok(None);
+    }
+    
+    // Get the metadata for the file so that we can know size, 
+    let metadata = fs::metadata(path)?;
+
+    // Check if the file is too large
+    if metadata.len() > max_size as u64 {
+        return Ok(None);
+    }
+
+
+    
+    todo!()
+}
