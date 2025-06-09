@@ -6,14 +6,6 @@ use ratatui::widgets::ListState;
 
 use crate::app_error::AppError;
 
-/// Represents a UI message with optional timeout
-#[derive(Clone, Debug)]
-pub struct Message {
-    pub text: String,
-    pub created_at: Instant,
-    pub timeout: Duration,
-    pub success: bool,
-}
 
 /// Main application state
 #[derive(Clone)]
@@ -21,6 +13,7 @@ pub struct App {
     pub current_dir: PathBuf,
     pub git_root: Option<PathBuf>,
     pub items: Vec<FileItem>,
+    pub collected_files: Vec<CollectedFile>,
     pub state: ListState,
     pub gitignore: Option<Gitignore>,
     pub show_hidden: bool,
@@ -36,6 +29,24 @@ pub struct FileItem {
     pub is_dir: bool,
     pub is_symlink: bool,
     pub is_hidden: bool,
+}
+
+/// Represents a file that will be added to the clipboard
+#[derive(Debug, Clone)]
+pub struct CollectedFile {
+    pub path: PathBuf,
+    pub relative_path: String, // Path relative to git root or current working directory
+    pub content: String,
+    pub language: String,      // For markdown code block highlighting
+}
+
+/// Represents a UI message with optional timeout
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub text: String,
+    pub created_at: Instant,
+    pub timeout: Duration,
+    pub success: bool,
 }
 
 
@@ -68,12 +79,12 @@ impl App {
             current_dir: start_dir,
             git_root,
             items: Vec::new(),
+            collected_files: Vec::new(),
             state: ListState::default(),
             gitignore,
             show_hidden: false,
             show_gitignored: false,
             message: None,
-            
         };
 
         // populate app 
