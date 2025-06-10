@@ -50,6 +50,7 @@ pub struct App {
     pub show_hidden: bool,
     pub show_gitignored: bool,
     pub message: Option<Message>,
+    pub show_help: bool,
 }
 
 /// Represents a file system entry
@@ -101,6 +102,7 @@ impl App {
             show_hidden: false,
             show_gitignored: false,
             message: None,
+            show_help: false,
         };
 
         // populate app 
@@ -156,6 +158,64 @@ impl App {
         self.state.select_first();
     
        Ok(())
+    }
+
+    /// Get contextual hints based on current state
+    pub fn get_contextual_hint(&self) -> Option<String> {
+        // Priority order for hints - show the most relevant one
+        
+        if self.show_help {
+            return Some("Press '?' or ESC to close help".to_string());
+        }
+        
+        // New user hint - no files collected yet
+        if self.collected_files.is_empty() {
+            if let Some(item) = self.current_selection() {
+                if !item.is_dir {
+                    return Some("Press 'a' to add this file to your collection".to_string());
+                } else {
+                    return Some("Press 'A' to add all files in this directory".to_string());
+                }
+            }
+            return Some("Navigate to files and press 'a' to start collecting".to_string());
+        }
+        
+        // Collection size warnings
+        let size = self.get_collection_size();
+        if size > 50 * MEGABYTE {
+            return Some("Collection is very large! Consider using 'd' to remove files or 'S' to save".to_string());
+        } else if size > 25 * MEGABYTE {
+            return Some("Collection growing large. Ready to export with 'S' or 'C'".to_string());
+        }
+        
+        // Suggest refresh if files might be stale (collected over 5 minutes ago)
+        if !self.collected_files.is_empty() {
+            let oldest_collection = self.collected_files
+                .iter()
+                .map(|f| f.collected_at)
+                .min();
+                
+            if let Some(oldest) = oldest_collection {
+                if let Ok(elapsed) = SystemTime::now().duration_since(oldest) {
+                    if elapsed.as_secs() > 300 { // 5 minutes
+                        return Some("Files collected a while ago - press 'r' to refresh".to_string());
+                    }
+                }
+            }
+        }
+        
+        // Collection ready hints
+        if self.collected_files.len() >= 5 {
+            return Some("Press 'S' to save or 'C' to copy your collection".to_string());
+        }
+        
+        // Default hint when collection has some files
+        if self.collected_files.len() > 0 {
+            return Some(format!("{} files collected - 'a' to add more, 'S' to save", 
+                self.collected_files.len()));
+        }
+        
+        None
     }
 
 
@@ -349,10 +409,9 @@ impl App {
                 // Provide specific, actionable error messages
                 let error_message = match e {
                     AppError::FileTooLarge { size, max } => {
-                        // No dereference needed - size and max are already values
                         format!("File too large: {} (max: {})", 
-                            self.format_size(size as usize),  // Just cast size to usize
-                            self.format_size(max)              // max is already usize
+                            self.format_size(size as usize),
+                            self.format_size(max)
                         )
                     },
                     AppError::BinaryFile => {
@@ -389,18 +448,36 @@ impl App {
             Some(index) => {
                 // Replace existing file
                 self.collected_files[index] = new_collected_file;
-                self.set_success_message(format!(
+                
+                // Build success message with size warning if applicable
+                let mut message = format!(
                     "Updated {} ({} KB) - Total: {} files",
                     name, size_kb, old_count
-                ));
+                );
+                
+                // Check for size warning after update
+                if let Some(warning) = self.get_size_warning() {
+                    message.push_str(&format!(" | {}", warning));
+                }
+                
+                self.set_success_message(message);
             }
             None => {
                 // Add new file
                 self.collected_files.push(new_collected_file);
-                self.set_success_message(format!(
+                
+                // Build success message with size warning if applicable
+                let mut message = format!(
                     "Added {} ({} KB) - Total: {} files",
                     name, size_kb, old_count + 1
-                ));
+                );
+                
+                // Check for size warning after addition
+                if let Some(warning) = self.get_size_warning() {
+                    message.push_str(&format!(" | {}", warning));
+                }
+                
+                self.set_success_message(message);
             }
         }
 
@@ -412,6 +489,9 @@ impl App {
         let mut updated = 0;
         let mut skipped = 0;
         let mut errors = 0;
+
+        // Store initial size to detect if we're crossing thresholds
+        let initial_size = self.get_collection_size();
 
         for item in &self.items {
             if item.is_dir {
@@ -452,11 +532,27 @@ impl App {
         }
 
         let total = self.collected_files.len();
-        let size_str = self.format_size(self.get_collection_size());
-        self.set_success_message(format!(
+        let current_size = self.get_collection_size();
+        let size_str = self.format_size(current_size);
+        
+        // Build the base message
+        let mut message = format!(
             "Added {} files, updated {}, skipped {} (errors: {}) - Total: {} files ({})",
             added, updated, skipped, errors, total, size_str
-        ));
+        );
+        
+        // Add size warning if applicable
+        if let Some(warning) = self.get_size_warning() {
+            message.push_str(&format!("\n{}", warning));
+            
+            // Special case: if we crossed from safe to warning/critical in one operation
+            const WARNING_THRESHOLD: usize = 25 * MEGABYTE;
+            if initial_size < WARNING_THRESHOLD && current_size >= WARNING_THRESHOLD {
+                message.push_str("\nTip: Use 'd' to remove individual files or 'D' to clear all");
+            }
+        }
+        
+        self.set_success_message(message);
 
         Ok(())
     }
@@ -634,10 +730,54 @@ impl App {
 
         summary
     }
+
+    pub fn get_display_path(&self, path: &Path) -> String {
+        // This method provides a shorter, more readable path for status messages
+        // It prioritizes showing the most relevant context
+        
+        if let Ok(rel_path) = path.strip_prefix(&self.current_dir) {
+            // If file is in current directory, just show the filename
+            if rel_path.components().count() == 1 {
+                rel_path.to_string_lossy().to_string()
+            } else {
+                // Show relative path from current directory
+                format!("./{}", rel_path.to_string_lossy())
+            }
+        } else {
+            // Use the full relative path calculation for files outside current directory
+            self.calculate_relative_path(path)
+                .unwrap_or_else(|_| path.to_string_lossy().to_string())
+        }
+    }
 }
 
 /// Util functions for App
 impl App {
+    /// Check collection size and return appropriate warning message
+    fn get_size_warning(&self) -> Option<String> {
+        let size = self.get_collection_size();
+        
+        // Define our warning thresholds
+        const WARNING_THRESHOLD: usize = 25 * MEGABYTE;
+        const CRITICAL_THRESHOLD: usize = 50 * MEGABYTE;
+        
+        match size {
+            s if s > CRITICAL_THRESHOLD => {
+                Some(format!(
+                    "⚠️ Collection is very large ({}) - Consider removing some files", 
+                    self.format_size(s)
+                ))
+            },
+            s if s > WARNING_THRESHOLD => {
+                Some(format!(
+                    "⚠️ Collection is getting large ({})", 
+                    self.format_size(s)
+                ))
+            },
+            _ => None
+        }
+    }
+
     /// Create a CollectedFile with full metadata for change tracking
     fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
         if item.is_dir {
@@ -705,10 +845,63 @@ impl App {
             return Ok(format!("{}/{}", current_dir_name, rel_path.to_string_lossy()));
         }
         
-        // If all else fails, use just the filename
-        Ok(path.file_name()
+        // Enhanced fallback: Always include parent directory context
+        // This ensures users understand where the file is located even in edge cases
+        
+        // Get the parent directory name, handling edge cases
+        let parent_name = path.parent()
+            .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.display().to_string()))
+            .unwrap_or_else(|| {
+                // If there's no parent or parent has no name (like root),
+                // try to get a meaningful context
+                if let Some(parent) = path.parent() {
+                    // Try to get the last two components of the parent path
+                    let components: Vec<_> = parent.components()
+                        .rev()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect();
+                    
+                    if components.is_empty() {
+                        "root".to_string()
+                    } else {
+                        components.join("/")
+                    }
+                } else {
+                    "root".to_string()
+                }
+            });
+        
+        // Get the file name
+        let file_name = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                // Last resort: just use the last component of the path
+                path.components()
+                    .last()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            });
+        
+        // Handle special cases for very long paths
+        let relative_path = format!("{}/{}", parent_name, file_name);
+        
+        // If the path is too long, truncate the parent portion but keep the filename intact
+        if relative_path.len() > 60 {
+            let max_parent_len = 60_usize.saturating_sub(file_name.len() + 4); // 4 for ".../"
+            if parent_name.len() > max_parent_len && max_parent_len > 3 {
+                let truncated_parent = format!("...{}", &parent_name[parent_name.len() - max_parent_len + 3..]);
+                Ok(format!("{}/{}", truncated_parent, file_name))
+            } else {
+                Ok(relative_path)
+            }
+        } else {
+            Ok(relative_path)
+        }
     }
 
 
