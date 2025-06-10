@@ -75,52 +75,6 @@ impl App {
         Ok(app)
     }
 
-    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory d
-    pub fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
-        // First, check if this is even a file (not a directory)
-        if item.is_dir {
-            return Err(AppError::NotAFile);
-        }
-        
-        // Try to read the file content
-        let content = read_file_safely(&item.path, 10 * MEGABYTE)?
-            .ok_or_else(|| AppError::FileReadFailure)?;
-        
-        // Calculate the relative path
-        // Use git root if available, otherwise use the directory where we started
-        let base_path = self.git_root.as_ref().unwrap_or(&self.start_dir);
-        
-        let relative_path = match item.path.strip_prefix(base_path) {
-            Ok(rel_path) => {
-                // Successfully got a relative path
-                rel_path.to_string_lossy().to_string()
-            }
-            Err(_) => {
-                // File is outside our base directory
-                // This could happen if they navigated up past the git root
-                // In this case, we might want to use the full path
-                // or calculate relative to current_dir instead
-                item.path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| item.path.display().to_string())
-            }
-        };
-        
-        // Get the language for syntax highlighting
-        let language = get_file_type(&item.path)
-            .unwrap_or("plaintext")
-            .to_string();
-        
-        Ok(CollectedFile {
-            path: item.path.clone(),
-            relative_path,
-            content,
-            language,
-        })
-    }
-
-    
-
 
     pub fn refresh_files(&mut self) -> Result<(), AppError>{
         // Clear items out of our items vec to reset
@@ -170,43 +124,6 @@ impl App {
        Ok(())
     }
 
-    /// Determine if we should include the files based on hidden and gitignore status
-    fn should_include_file(&self, path: &Path, name: &str, is_dir: bool) -> bool {
-        if self.is_hidden(path, name) && !self.show_hidden {
-            return false;
-        }
-
-        if let Some(ignore) = &self.gitignore {
-
-            match ignore.matched(path, is_dir) {
-                ignore::Match::Ignore(_) if !self.show_gitignored => return false,
-                ignore::Match::Whitelist(_) => return true,
-                _ => {}
-            }
-        }
-
-        true
-    }
-
-    /// Check if a file is hidden (different on Windows than Linux)
-    fn is_hidden(&self, path: &Path, name: &str) -> bool {
-        // Windows: we need to check file metadata/attributes
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            if let Ok(metadata) = path.metadata() {
-                let attributes = metadata.file_attributes();
-                // FILE_ATTRIBUTE_HIDDEN = 0x2 so we check if there is 2
-                if (attributes & 2) != 0 {
-                    return true;
-                }
-            }
-        }
-
-        // -- else AND for linux/unix we can just check for the `.` prefix 
-        name.starts_with('.')
-    }
-
 
     /// Get the currently selected item
     pub fn current_selection(&self) -> Option<&FileItem> {
@@ -248,6 +165,106 @@ impl App {
         self.generate_tree_recursive(&self.current_dir, &mut output, "", 0, max_depth)?;
 
         Ok(output)
+    }
+
+    
+
+    /// Copy tree to clipboard (requires clipboard feature)
+    #[cfg(feature = "clipboard")]
+    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
+        use arboard::Clipboard;
+
+        let tree = self.generate_tree(None)?;
+        
+        Clipboard::new()?
+            .set_text(tree)?;
+
+        Ok(())
+    }
+
+    /// In case the feature is disabled
+    #[cfg(not(feature = "clipboard"))]
+    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
+        Err(AppError::UnsupportedOperation(
+            "Clipboard support not compiled. Use --features clipboard".to_string(),
+        ))
+    }
+
+    /// Set a success message that will disappear after a timeout
+    pub fn set_success_message(&mut self, text: String) {
+        self.message = Some(Message {
+            text,
+            created_at: Instant::now(),
+            timeout: Duration::from_secs(3), // 3 seconds timeout
+            success: true,
+        });
+    }
+
+    /// Set an error message that will disappear after a timeout
+    pub fn set_error_message(&mut self, text: String) {
+        self.message = Some(Message {
+            text,
+            created_at: Instant::now(),
+            timeout: Duration::from_secs(3), // 3 seconds timeout
+            success: false,
+        });
+    }
+
+    /// Check if current message has timed out and clear it if needed
+    pub fn update_message(&mut self) {
+        if let Some(message) = &self.message {
+            if message.created_at.elapsed() >= message.timeout {
+                self.message = None;
+            }
+        }
+    }
+    
+}
+
+// Util functions for App
+impl App {
+    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory d
+    fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
+        // First, check if this is even a file (not a directory)
+        if item.is_dir {
+            return Err(AppError::NotAFile);
+        }
+        
+        // Try to read the file content
+        let content = read_file_safely(&item.path, 10 * MEGABYTE)?
+            .ok_or_else(|| AppError::FileReadFailure)?;
+        
+        // Calculate the relative path
+        // Use git root if available, otherwise use the directory where we started
+        let base_path = self.git_root.as_ref().unwrap_or(&self.start_dir);
+        
+        let relative_path = match item.path.strip_prefix(base_path) {
+            Ok(rel_path) => {
+                // Successfully got a relative path
+                rel_path.to_string_lossy().to_string()
+            }
+            Err(_) => {
+                // File is outside our base directory
+                // This could happen if they navigated up past the git root
+                // In this case, we might want to use the full path
+                // or calculate relative to current_dir instead
+                item.path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| item.path.display().to_string())
+            }
+        };
+        
+        // Get the language for syntax highlighting
+        let language = get_file_type(&item.path)
+            .unwrap_or("plaintext")
+            .to_string();
+        
+        Ok(CollectedFile {
+            path: item.path.clone(),
+            relative_path,
+            content,
+            language,
+        })
     }
 
     fn generate_tree_recursive(
@@ -319,54 +336,40 @@ impl App {
         Ok(())
     }
 
-    /// Copy tree to clipboard (requires clipboard feature)
-    #[cfg(feature = "clipboard")]
-    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
-        use arboard::Clipboard;
+    /// Determine if we should include the files based on hidden and gitignore status
+    fn should_include_file(&self, path: &Path, name: &str, is_dir: bool) -> bool {
+        if self.is_hidden(path, name) && !self.show_hidden {
+            return false;
+        }
 
-        let tree = self.generate_tree(None)?;
-        
-        Clipboard::new()?
-            .set_text(tree)?;
+        if let Some(ignore) = &self.gitignore {
 
-        Ok(())
-    }
-
-    /// In case the feature is disabled
-    #[cfg(not(feature = "clipboard"))]
-    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
-        Err(AppError::UnsupportedOperation(
-            "Clipboard support not compiled. Use --features clipboard".to_string(),
-        ))
-    }
-
-    /// Set a success message that will disappear after a timeout
-    pub fn set_success_message(&mut self, text: String) {
-        self.message = Some(Message {
-            text,
-            created_at: Instant::now(),
-            timeout: Duration::from_secs(3), // 3 seconds timeout
-            success: true,
-        });
-    }
-
-    /// Set an error message that will disappear after a timeout
-    pub fn set_error_message(&mut self, text: String) {
-        self.message = Some(Message {
-            text,
-            created_at: Instant::now(),
-            timeout: Duration::from_secs(3), // 3 seconds timeout
-            success: false,
-        });
-    }
-
-    /// Check if current message has timed out and clear it if needed
-    pub fn update_message(&mut self) {
-        if let Some(message) = &self.message {
-            if message.created_at.elapsed() >= message.timeout {
-                self.message = None;
+            match ignore.matched(path, is_dir) {
+                ignore::Match::Ignore(_) if !self.show_gitignored => return false,
+                ignore::Match::Whitelist(_) => return true,
+                _ => {}
             }
         }
+
+        true
     }
-    
+
+    /// Check if a file is hidden (different on Windows than Linux)
+    fn is_hidden(&self, path: &Path, name: &str) -> bool {
+        // Windows: we need to check file metadata/attributes
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if let Ok(metadata) = path.metadata() {
+                let attributes = metadata.file_attributes();
+                // FILE_ATTRIBUTE_HIDDEN = 0x2 so we check if there is 2
+                if (attributes & 2) != 0 {
+                    return true;
+                }
+            }
+        }
+
+        // -- else AND for linux/unix we can just check for the `.` prefix 
+        name.starts_with('.')
+    }
 }
