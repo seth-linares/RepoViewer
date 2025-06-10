@@ -32,9 +32,6 @@ pub enum AppError {
     #[error("The FileItem is a directory and cannot be collected")]
     NotAFile,
 
-    /// Failed to convert from FileItem to CollectionItem
-    #[error("Failed to convert from a FileItem to CollectionItem")]
-    FileItemConversionFailure,
 
     /// Failed to read from a FileItem during conversion
     #[error("Failed to read from a FileItem")]
@@ -51,18 +48,6 @@ pub enum AppError {
     /// Expected directory was not found
     #[error("Directory not found: {0}")]
     DirectoryNotFound(String),
-
-    /// General terminal-related logical errors not covered by Crossterm or Io variants
-    #[error("Terminal setup or logic error: {0}")]
-    TerminalError(String), // For high-level TUI logic errors
-
-    /// An operation that is not supported by the application
-    #[error("Unsupported operation: {0}")]
-    UnsupportedOperation(String),
-
-    /// Configuration related errors (e.g. missing config file, invalid value)
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
 
     /// Git repository does not have a parent
     #[error("Git repository does not have a parent")]
