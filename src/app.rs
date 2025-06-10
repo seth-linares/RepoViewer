@@ -1,9 +1,40 @@
-use std::{fs::{self}, path::{Path, PathBuf}, time::{Duration, Instant}};
+use std::{fs::{self}, path::{Path, PathBuf}, time::{Duration, Instant, SystemTime}};
 
 use ignore::gitignore::Gitignore;
 use ratatui::widgets::ListState;
 
 use crate::{app_error::AppError, utils::{find_repo, get_file_type, read_file_safely, MEGABYTE}};
+
+/// Result of refreshing a single file
+#[derive(Debug)]
+pub enum FileStatus {
+    Unchanged,
+    Modified,
+    Deleted,
+    NotAFile,
+    Inaccessible,
+    Unknown,
+}
+
+/// Result of refreshing a single file
+#[derive(Debug)]
+pub enum RefreshResult {
+    NoChange,
+    Updated,
+    FileDeleted,
+    FileInaccessible,
+    Failed(String),
+}
+
+/// Summary of refreshing all collected files
+#[derive(Debug, Default)]
+pub struct RefreshSummary {
+    pub unchanged: usize,
+    pub updated: usize,
+    pub deleted: usize,
+    pub inaccessible: usize,
+    pub failed: usize,
+}
 
 
 /// Main application state
@@ -35,9 +66,13 @@ pub struct FileItem {
 #[derive(Debug, Clone)]
 pub struct CollectedFile {
     pub path: PathBuf,
-    pub relative_path: String, // Path relative to git root or current working directory
+    pub relative_path: String,
     pub content: String,
-    pub language: String,      // For markdown code block highlighting
+    pub language: String,
+    pub collected_at: SystemTime,
+    pub content_hash: u64,           // Quick way to detect content changes
+    pub file_size: u64,              // Original file size
+    pub last_modified: SystemTime,   // File's modification time when collected
 }
 
 /// Represents a UI message with optional timeout
@@ -224,15 +259,62 @@ impl App {
 /// File Collection functions for App
 impl App {
     pub fn add_current_file(&mut self) -> Result<(), AppError> {
-        // Use the existing create_collected_file method
+        let current_item = match self.current_selection() {
+            Some(item) => item,
+            None => {
+                self.set_error_message("No file selected".to_string());
+                return Ok(());
+            }
+        };
 
-        // need to add currently selected item to collection
-        if self.current_selection().is_some_and(|item| item.is_dir) {
-            self.set_error_message("Item cannot be a directory".to_string());
-            return Err(AppError::NotAFile);
+        if current_item.is_dir {
+            self.set_error_message("Cannot collect directories".to_string());
+            return Ok(());
         }
 
-        todo!()
+        // Create collected file early
+        let new_collected_file = match self.create_collected_file(current_item) {
+            Ok(file) => file,
+            Err(AppError::NotAFile) => {
+                self.set_error_message("Cannot collect: not a text file".to_string());
+                return Ok(());
+            }
+            Err(e) => {
+                self.set_error_message(format!("Failed to read file: {}", e));
+                return Ok(());
+            }
+        };
+
+        // Calculate size before any borrows
+        let size_kb = new_collected_file.content.len() / 1024;
+        let name = current_item.name.clone();
+
+        // Use a temporary for position lookup
+        let existing_index = self.collected_files
+            .iter()
+            .position(|f| f.path == new_collected_file.path);
+        
+        let old_count = self.collected_files.len();
+
+        match existing_index {
+            Some(index) => {
+                // Replace existing file
+                self.collected_files[index] = new_collected_file;
+                self.set_success_message(format!(
+                    "Updated {name} ({size_kb} KB) - Total: {old_count} files"
+                ));
+            }
+            None => {
+                // Add new file
+                self.collected_files.push(new_collected_file);
+                self.set_success_message(format!(
+                    "Added {name} ({size_kb} KB) - Total: {} files",
+                    old_count + 1
+                ));
+            }
+        }
+
+        Ok(())
     }
     
     pub fn add_all_files_in_dir(&mut self) -> Result<(), AppError> {
@@ -271,40 +353,133 @@ impl App {
         
         output
     }
+
+    /// Check if a collected file has changed on disk
+    pub fn check_file_status(&self, collected: &CollectedFile) -> FileStatus {
+        // First check if the file still exists
+        if !collected.path.exists() {
+            return FileStatus::Deleted;
+        }
+        
+        // Check if it's still a file (not replaced by a directory)
+        if !collected.path.is_file() {
+            return FileStatus::NotAFile;
+        }
+        
+        // Check modification time
+        match std::fs::metadata(&collected.path) {
+            Ok(metadata) => {
+                match metadata.modified() {
+                    Ok(modified) => {
+                        if modified > collected.last_modified {
+                            FileStatus::Modified
+                        } else {
+                            FileStatus::Unchanged
+                        }
+                    }
+                    Err(_) => FileStatus::Unknown,
+                }
+            }
+            Err(_) => FileStatus::Inaccessible,
+        }
+    }
+    
+    /// Refresh a single collected file if it has changed
+    pub fn refresh_collected_file(&mut self, index: usize) -> Result<RefreshResult, AppError> {
+        if index >= self.collected_files.len() {
+            return Err(AppError::LogicError("Invalid collection index".to_string()));
+        }
+        
+        let old_file = &self.collected_files[index];
+        let status = self.check_file_status(old_file);
+        
+        match status {
+            FileStatus::Unchanged => Ok(RefreshResult::NoChange),
+            FileStatus::Modified => {
+                                // Create a temporary FileItem to reuse our existing logic
+                                let temp_item = FileItem {
+                                    path: old_file.path.clone(),
+                                    name: old_file.path.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_default(),
+                                    is_dir: false,
+                                    is_symlink: false,
+                                    is_hidden: false,
+                                };
+                
+                                match self.create_collected_file(&temp_item) {
+                                    Ok(new_file) => {
+                                        self.collected_files[index] = new_file;
+                                        Ok(RefreshResult::Updated)
+                                    }
+                                    Err(e) => Ok(RefreshResult::Failed(e.to_string())),
+                                }
+                            }
+            FileStatus::Deleted => Ok(RefreshResult::FileDeleted),
+            FileStatus::Inaccessible => Ok(RefreshResult::FileInaccessible),
+            FileStatus::NotAFile => Ok(RefreshResult::Failed("No longer a file".to_string())),
+            FileStatus::Unknown => Ok(RefreshResult::Failed("Cannot check status".to_string())),
+        }
+    }
+    
+    /// Refresh all collected files, removing deleted ones
+    pub fn refresh_all_collected(&mut self) -> RefreshSummary {
+        let mut summary = RefreshSummary::default();
+        let mut indices_to_remove = Vec::new();
+        
+        // Check each file and collect indices of files to remove
+        for (index, _) in self.collected_files.iter_mut().enumerate() {
+            match self.refresh_collected_file(index) {
+                Ok(RefreshResult::NoChange) => summary.unchanged += 1,
+                Ok(RefreshResult::Updated) => summary.updated += 1,
+                Ok(RefreshResult::FileDeleted) => {
+                    summary.deleted += 1;
+                    indices_to_remove.push(index);
+                }
+                Ok(RefreshResult::FileInaccessible) => {
+                    summary.inaccessible += 1;
+                    indices_to_remove.push(index);
+                }
+                Ok(RefreshResult::Failed(_)) => summary.failed += 1,
+                Err(_) => summary.failed += 1,
+            }
+        }
+        
+        // Remove deleted/inaccessible files in reverse order to maintain indices
+        for index in indices_to_remove.into_iter().rev() {
+            self.collected_files.remove(index);
+        }
+        
+        summary
+    }
 }
 
 /// Util functions for App
 impl App {
-    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory d
+    /// Create a CollectedFile with full metadata for change tracking
     fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
-        // First, check if this is even a file (not a directory)
         if item.is_dir {
             return Err(AppError::NotAFile);
         }
+        
+        // Get file metadata before reading content
+        let metadata = std::fs::metadata(&item.path)?;
+        let last_modified = metadata.modified()?;
+        let file_size = metadata.len();
         
         // Try to read the file content
         let content = read_file_safely(&item.path, 10 * MEGABYTE)?
             .ok_or_else(|| AppError::FileReadFailure)?;
         
-        // Calculate the relative path
-        // Use git root if available, otherwise use the directory where we started
-        let base_path = self.git_root.as_ref().unwrap_or(&self.start_dir);
+        // Calculate content hash for quick comparison later
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        let content_hash = hasher.finish();
         
-        let relative_path = match item.path.strip_prefix(base_path) {
-            Ok(rel_path) => {
-                // Successfully got a relative path
-                rel_path.to_string_lossy().to_string()
-            }
-            Err(_) => {
-                // File is outside our base directory
-                // This could happen if they navigated up past the git root
-                // In this case, we might want to use the full path
-                // or calculate relative to current_dir instead
-                item.path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| item.path.display().to_string())
-            }
-        };
+        // Calculate relative path - but now we handle edge cases better
+        let relative_path = self.calculate_relative_path(&item.path)?;
         
         // Get the language for syntax highlighting
         let language = get_file_type(&item.path)
@@ -316,8 +491,45 @@ impl App {
             relative_path,
             content,
             language,
+            collected_at: SystemTime::now(),
+            content_hash,
+            file_size,
+            last_modified,
         })
     }
+    
+    /// Calculate relative path with better error handling
+    fn calculate_relative_path(&self, path: &Path) -> Result<String, AppError> {
+        // Try multiple strategies to get a meaningful relative path
+        
+        // First, try relative to git root
+        if let Some(git_root) = &self.git_root {
+            if let Ok(rel_path) = path.strip_prefix(git_root) {
+                return Ok(rel_path.to_string_lossy().to_string());
+            }
+        }
+        
+        // Then try relative to start directory
+        if let Ok(rel_path) = path.strip_prefix(&self.start_dir) {
+            return Ok(rel_path.to_string_lossy().to_string());
+        }
+        
+        // Finally, try relative to current directory
+        if let Ok(rel_path) = path.strip_prefix(&self.current_dir) {
+            // Prefix with current dir name to provide context
+            let current_dir_name = self.current_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "current".to_string());
+            return Ok(format!("{}/{}", current_dir_name, rel_path.to_string_lossy()));
+        }
+        
+        // If all else fails, use just the filename
+        Ok(path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string()))
+    }
+
 
     fn generate_tree_recursive(
         &self,
