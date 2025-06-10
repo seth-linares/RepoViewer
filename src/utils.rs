@@ -448,62 +448,56 @@ pub fn get_file_type(path: &Path) -> Option<&'static str> {
     None
 }
 
-pub fn read_file_safely(path: &Path, max_size: usize) -> Result<Option<String>, AppError> {
-    // Step 1: Check if file type is whitelisted
+pub fn read_file_safely(path: &Path, max_size: usize) -> Result<String, AppError> {
+    // Check if file type is whitelisted
     if get_file_type(path).is_none() {
-        return Ok(None);
+        let extension = path.extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_string());
+        return Err(AppError::UnrecognizedFileType { extension });
     }
     
-    // Step 2: Get metadata and check size
+    // Get metadata and check size
     let metadata = fs::metadata(path)?;
     if metadata.len() > max_size as u64 {
-        return Ok(None);
+        return Err(AppError::FileTooLarge { 
+            size: metadata.len(), 
+            max: max_size 
+        });
     }
     
-    // Step 3: Read the entire file at once (simpler and still safe due to size check)
+    // Read the file
     let contents = fs::read(path)?;
     
-    // Step 4: Validate size again (in case file grew during read)
-    if contents.len() > max_size {
-        return Ok(None);
-    }
-    
-    // Step 5: Check for binary content
-    // Check for null bytes (strongest indicator of binary)
+    // Check for binary content
     if contents.contains(&0) {
-        return Ok(None);
+        return Err(AppError::BinaryFile);
     }
     
     // Check for excessive control characters
     let control_char_count = contents.iter()
         .filter(|&&b| {
-            // Count bytes that are control characters but not common whitespace
             (b < 0x20 || b == 0x7F) && !matches!(b, b'\t' | b'\n' | b'\r')
         })
         .count();
     
-    // Reject if more than 5% control characters (more strict than 10%)
     if control_char_count > contents.len() / 20 {
-        return Ok(None);
+        return Err(AppError::BinaryFile);
     }
     
-    // Step 6: Convert to UTF-8
+    // Convert to UTF-8
     match String::from_utf8(contents) {
-        Ok(string) => Ok(Some(string)),
+        Ok(string) => Ok(string),
         Err(e) => {
-            // For files with minor UTF-8 issues, use lossy conversion
             let lossy = String::from_utf8_lossy(e.as_bytes());
-            
-            // Count replacement characters
             let replacement_count = lossy.chars()
                 .filter(|&c| c == '\u{FFFD}')
                 .count();
             
-            // Accept if less than 0.1% of characters are replacements
             if replacement_count < lossy.len() / 1000 {
-                Ok(Some(lossy.into_owned()))
+                Ok(lossy.into_owned())
             } else {
-                Ok(None)
+                Err(AppError::EncodingError)
             }
         }
     }
