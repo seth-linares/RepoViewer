@@ -426,9 +426,9 @@ impl App {
     pub fn refresh_all_collected(&mut self) -> RefreshSummary {
         let mut summary = RefreshSummary::default();
         let mut indices_to_remove = Vec::new();
-        
-        // Check each file and collect indices of files to remove
-        for (index, _) in self.collected_files.iter_mut().enumerate() {
+
+        // Use indices instead of iter_mut to avoid holding a mutable reference
+        for index in 0..self.collected_files.len() {
             match self.refresh_collected_file(index) {
                 Ok(RefreshResult::NoChange) => summary.unchanged += 1,
                 Ok(RefreshResult::Updated) => summary.updated += 1,
@@ -444,12 +444,13 @@ impl App {
                 Err(_) => summary.failed += 1,
             }
         }
-        
-        // Remove deleted/inaccessible files in reverse order to maintain indices
-        for index in indices_to_remove.into_iter().rev() {
+
+        // Remove in reverse order to maintain valid indices
+        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        for index in indices_to_remove {
             self.collected_files.remove(index);
         }
-        
+
         summary
     }
 }
