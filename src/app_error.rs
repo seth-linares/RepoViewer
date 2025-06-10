@@ -28,6 +28,18 @@ pub enum AppError {
 
     // --- Application-specific errors ---
 
+    /// Failed to convert from FileItem to CollectionItem
+    #[error("The FileItem is a directory and cannot be collected")]
+    NotAFile,
+
+    /// Failed to convert from FileItem to CollectionItem
+    #[error("Failed to convert from a FileItem to CollectionItem")]
+    FileItemConversionFailure,
+
+    /// Failed to read from a FileItem during conversion
+    #[error("Failed to read from a FileItem")]
+    FileReadFailure,
+
     /// Invalid path provided or determined
     #[error("Invalid path: {0}")]
     InvalidPath(String),
