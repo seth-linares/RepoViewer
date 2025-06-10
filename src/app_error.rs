@@ -32,6 +32,18 @@ pub enum AppError {
     #[error("The FileItem is a directory and cannot be collected")]
     NotAFile,
 
+    #[error("File too large: {size} bytes (max: {max} bytes)")]
+    FileTooLarge { size: u64, max: usize },
+
+    #[error("Binary file detected (contains null bytes)")]
+    BinaryFile,
+
+    #[error("Not a recognized text file type: {extension:?}")]
+    UnrecognizedFileType { extension: Option<String> },
+
+    #[error("File encoding error: too many invalid UTF-8 sequences")]
+    EncodingError,
+
 
     /// Failed to read from a FileItem during conversion
     #[error("Failed to read from a FileItem")]
