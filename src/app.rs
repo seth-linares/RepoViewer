@@ -342,15 +342,34 @@ impl App {
             return Ok(());
         }
 
-        // Create collected file early to ensure it is a readable file as well as prevent mutability conflicts
+        // Create collected file with better error handling
         let new_collected_file = match self.create_collected_file(current_item) {
             Ok(file) => file,
-            Err(AppError::NotAFile) => {
-                self.set_error_message("Cannot collect: not a text file".to_string());
-                return Ok(());
-            }
             Err(e) => {
-                self.set_error_message(format!("Failed to read file: {}", e));
+                // Provide specific, actionable error messages
+                let error_message = match e {
+                    AppError::FileTooLarge { size, max } => {
+                        // No dereference needed - size and max are already values
+                        format!("File too large: {} (max: {})", 
+                            self.format_size(size as usize),  // Just cast size to usize
+                            self.format_size(max)              // max is already usize
+                        )
+                    },
+                    AppError::BinaryFile => {
+                        "Cannot collect binary files - only text files are supported".to_string()
+                    },
+                    AppError::UnrecognizedFileType { extension } => {
+                        match extension {
+                            Some(ext) => format!("Unsupported file type: .{}", ext),
+                            None => "File has no extension - cannot determine type".to_string()
+                        }
+                    },
+                    AppError::EncodingError => {
+                        "File has encoding issues - too many invalid UTF-8 characters".to_string()
+                    },
+                    _ => format!("Failed to read file: {}", e),
+                };
+                self.set_error_message(error_message);
                 return Ok(());
             }
         };
@@ -371,22 +390,23 @@ impl App {
                 // Replace existing file
                 self.collected_files[index] = new_collected_file;
                 self.set_success_message(format!(
-                    "Updated {name} ({size_kb} KB) - Total: {old_count} files"
+                    "Updated {} ({} KB) - Total: {} files",
+                    name, size_kb, old_count
                 ));
             }
             None => {
                 // Add new file
                 self.collected_files.push(new_collected_file);
                 self.set_success_message(format!(
-                    "Added {name} ({size_kb} KB) - Total: {} files",
-                    old_count + 1
+                    "Added {} ({} KB) - Total: {} files",
+                    name, size_kb, old_count + 1
                 ));
             }
         }
 
         Ok(())
     }
-    
+        
     pub fn add_all_files_in_dir(&mut self) -> Result<(), AppError> {
         let mut added = 0;
         let mut updated = 0;
