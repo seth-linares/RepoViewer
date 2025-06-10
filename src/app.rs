@@ -630,8 +630,7 @@ impl App {
         let file_size = metadata.len();
         
         // Try to read the file content
-        let content = read_file_safely(&item.path, 10 * MEGABYTE)?
-            .ok_or_else(|| AppError::FileReadFailure)?;
+        let content = read_file_safely(&item.path, 10 * MEGABYTE)?;
         
         // Calculate content hash for quick comparison later
         use std::collections::hash_map::DefaultHasher;
