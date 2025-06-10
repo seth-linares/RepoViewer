@@ -795,7 +795,7 @@ impl App {
         }
 
         #[cfg(not(windows))]
-        let _ = path; // Suppress unused parameter warning
+        let _ = path;
 
         // -- else AND for linux/unix we can just check for the `.` prefix 
         name.starts_with('.')
