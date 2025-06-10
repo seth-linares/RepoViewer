@@ -49,7 +49,6 @@ pub struct Message {
     pub success: bool,
 }
 
-
 impl App {
     pub fn new(start_dir: PathBuf) -> Result<Self, AppError> {
         // Try to see if there's a repo where we're looking
@@ -221,7 +220,60 @@ impl App {
     
 }
 
-// Util functions for App
+
+/// File Collection functions for App
+impl App {
+    pub fn add_current_file(&mut self) -> Result<(), AppError> {
+        // Use the existing create_collected_file method
+
+        // need to add currently selected item to collection
+        if self.current_selection().is_some_and(|item| item.is_dir) {
+            self.set_error_message("Item cannot be a directory".to_string());
+            return Err(AppError::NotAFile);
+        }
+
+        todo!()
+    }
+    
+    pub fn add_all_files_in_dir(&mut self) -> Result<(), AppError> {
+        // Iterate through current directory, add all text files
+        todo!()
+    }
+    
+    pub fn remove_current_file(&mut self) -> Result<(), AppError> {
+        // Find and remove from collected_files vec
+        todo!()
+    }
+    
+    pub fn clear_collection(&mut self) -> Result<(), AppError> {
+        // Simply clear the vec and show message
+        todo!()
+    }
+
+    pub fn generate_markdown(&self) -> String {
+        let mut output = String::new();
+        
+        // Add a header explaining what this is
+        output.push_str("# Code Context\n\n");
+        output.push_str(&format!("Generated from: {}\n\n", 
+            self.git_root.as_ref().unwrap_or(&self.start_dir).display()));
+        
+        // For each collected file
+        for file in &self.collected_files {
+            // Add file header
+            output.push_str(&format!("\n## {}\n\n", file.relative_path));
+            
+            // Add code block with syntax highlighting
+            output.push_str(&format!("```{}\n", file.language));
+            output.push_str(&file.content);
+            output.push_str("\n```\n");
+        }
+        
+        output
+    }
+}
+
+/// Util functions for App
 impl App {
     /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory d
     fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
