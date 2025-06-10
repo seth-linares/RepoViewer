@@ -75,7 +75,7 @@ impl App {
         Ok(app)
     }
 
-    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory
+    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory d
     pub fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
         // First, check if this is even a file (not a directory)
         if item.is_dir {
