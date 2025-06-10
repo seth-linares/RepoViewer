@@ -20,23 +20,41 @@ impl UI {
     /// 2. Calls individual render methods for each section
     /// 3. Doesn't store any state - it just draws and returns
     pub fn render(frame: &mut Frame, app: &App) {
-        // Create the main layout -- this divides our terminal into three sections
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(4), // Header (fixed height)
-                Constraint::Min(5),    // File list (takes remaining space)
-                Constraint::Length(6), // Status bar (fixed height)
-            ])
-            .split(frame.area());
+        // If help is shown, render it on top of everything
+        if app.show_help {
+            // First render the normal UI (so it's visible in the background)
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(4),
+                    Constraint::Min(5),
+                    Constraint::Length(7), // Increased for contextual hints
+                ])
+                .split(frame.area());
 
-        // Now render each section
-        // Notice how we pass the specific area (chunk) for each component
-        Self::render_header(frame, app, chunks[0]);
-        Self::render_file_list(frame, app, chunks[1]);
-        Self::render_status_bar(frame, app, chunks[2]);
+            Self::render_header(frame, app, chunks[0]);
+            Self::render_file_list(frame, app, chunks[1]);
+            Self::render_status_bar_with_hints(frame, app, chunks[2]);
+            
+            // Then render the help overlay on top
+            Self::render_help_overlay(frame);
+        } else {
+            // Normal rendering
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(4),
+                    Constraint::Min(5),
+                    Constraint::Length(7), // Increased for contextual hints
+                ])
+                .split(frame.area());
 
-        // Render message popup if there is an active message
+            Self::render_header(frame, app, chunks[0]);
+            Self::render_file_list(frame, app, chunks[1]);
+            Self::render_status_bar_with_hints(frame, app, chunks[2]);
+        }
+
+        // Always render message popup if there is one
         if let Some(message) = &app.message {
             Self::render_message(frame, message);
         }
@@ -153,10 +171,39 @@ impl UI {
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 
+
+    
     /// Renders the status bar with keyboard shortcuts and toggle states
-    fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-        // Build the control information lines
-        // Each line shows different categories of controls
+    fn render_status_bar_with_hints(frame: &mut Frame, app: &App, area: Rect) {
+        // Split the status area into hint and controls sections
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Contextual hint
+                Constraint::Length(6), // Control information
+            ])
+            .split(area);
+        
+        // Render contextual hint if available
+        if let Some(hint) = app.get_contextual_hint() {
+            let hint_block = Block::default()
+                .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(Color::DarkGray));
+                
+            let hint_text = Line::from(vec![
+                Span::styled(" 💡 ", Style::default().fg(Color::Yellow)),
+                Span::styled(hint, Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)),
+            ]);
+            
+            let hint_paragraph = Paragraph::new(hint_text)
+                .block(hint_block)
+                .alignment(Alignment::Center);
+                
+            frame.render_widget(hint_paragraph, chunks[0]);
+        }
+        
+        // Render the regular status bar in the remaining space
+        // Update the controls to include help
         let controls = vec![
             // Navigation controls
             Line::from(vec![
@@ -227,17 +274,26 @@ impl UI {
                 Span::styled("C", Style::default().fg(Color::Green)),
                 Span::raw(" Export"),
             ]),
-            // Quit control
+            // Exit and help control
             Line::from(vec![
-                Span::styled("Exit:", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Other:", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" "),
+                Span::styled("?", Style::default().fg(Color::Cyan)),
+                Span::raw(" Help  "),
                 Span::styled("q/Esc", Style::default().fg(Color::Red)),
                 Span::raw(" Quit"),
             ]),
         ];
+        
+        // Render the status block
+        let status_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
 
-        // Update the layout constraints to accommodate the additional line
-        let chunks = Layout::default()
+        frame.render_widget(status_block, chunks[1]);
+        
+        // Layout for control lines
+        let control_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Line 1
@@ -246,23 +302,16 @@ impl UI {
                 Constraint::Length(1), // Line 4
                 Constraint::Length(1), // Line 5
             ])
-            .split(area);
+            .split(chunks[1]);
 
-        // Create the status block
-        let status_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-
-        frame.render_widget(status_block, area);
-
-        // Render each line of controls in its own area within the block
+        // Render each line of controls
         for (i, line) in controls.iter().enumerate() {
-            if i < chunks.len() {
+            if i < control_chunks.len() {
                 let inner_area = Rect {
-                    x: chunks[i].x + 1, // Add 1 to avoid drawing on the border
-                    y: chunks[i].y,
-                    width: chunks[i].width.saturating_sub(2), // Adjust width for both borders
-                    height: chunks[i].height,
+                    x: control_chunks[i].x + 1,
+                    y: control_chunks[i].y,
+                    width: control_chunks[i].width.saturating_sub(2),
+                    height: control_chunks[i].height,
                 };
                 let paragraph = Paragraph::new(line.clone()).style(Style::default());
                 frame.render_widget(paragraph, inner_area);
@@ -305,5 +354,96 @@ impl UI {
             .style(Style::default().fg(color));
 
         frame.render_widget(text, popup_area);
+    }
+
+    /// Renders the help overlay
+    pub fn render_help_overlay(frame: &mut Frame) {
+        let area = frame.area();
+        
+        // Create a centered area for the help content (80% width, 90% height)
+        let help_area = Rect::new(
+            area.width / 10,
+            area.height / 20,
+            area.width * 8 / 10,
+            area.height * 9 / 10,
+        );
+        
+        // Create the help content
+        let help_text = vec![
+            Line::from(vec![
+                Span::styled("RepoViewer Help", Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED))
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("  ↑/↓      Navigate through files and directories"),
+            Line::from("  ←        Go back to parent directory"),
+            Line::from("  →/Enter  Open selected directory"),
+            Line::from("  PgUp     Jump to first item"),
+            Line::from("  PgDn     Jump to last item"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("File Collection", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("  a        Add current file to collection"),
+            Line::from("  A        Add all files in current directory"),
+            Line::from("  d        Remove current file from collection"),
+            Line::from("  D        Clear entire collection"),
+            Line::from("  r        Refresh collected files (sync with changes)"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Export Options", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("  S        Save collection to markdown file"),
+            Line::from("  C        Copy collection to clipboard"),
+            Line::from("  t        Save directory tree to file"),
+            Line::from("  c        Copy directory tree to clipboard"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("View Options", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("  h        Toggle hidden files visibility"),
+            Line::from("  g        Toggle gitignored files (in git repos)"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Tips", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("  • Files marked with [+] are in your collection"),
+            Line::from("  • Collection size is shown in the header with health indicators"),
+            Line::from("  • Yellow warning at 25MB, red warning at 50MB"),
+            Line::from("  • Refresh (r) updates modified files and removes deleted ones"),
+            Line::from("  • The tree export includes directory structure for AI context"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press '?' or ESC to close this help", 
+                    Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
+            ]),
+        ];
+        
+        // Create the help block
+        let help_block = Block::default()
+            .title("  Help - RepoViewer  ")
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .style(Style::default().bg(Color::Black));
+        
+        // Create the paragraph
+        let help_paragraph = Paragraph::new(help_text)
+            .block(help_block)
+            .wrap(Wrap { trim: false })
+            .scroll((0, 0));
+        
+        // Clear the help area background first
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::Black)),
+            help_area
+        );
+        
+        // Render the help content
+        frame.render_widget(help_paragraph, help_area);
     }
 }
