@@ -151,6 +151,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         }
 
                         // --- Collection Controls ---
+                        
                         // Add current file to collection
                         KeyCode::Char('a') => app.add_current_file()?,
 
@@ -169,6 +170,71 @@ fn run_app<B: ratatui::backend::Backend>(
                                 app.set_error_message(format!("Failed to save file: {}", e));
                             }
                         },
+
+                        // Refresh collected files to sync with filesystem changes
+                        KeyCode::Char('r') => {
+                            // First, check if we even have files to refresh
+                            if app.collected_files.is_empty() {
+                                app.set_error_message("No files in collection to refresh".to_string());
+                            } else {
+                                // Store the initial count to detect net changes
+                                let initial_count = app.collected_files.len();
+                                
+                                // Perform the refresh operation
+                                let summary = app.refresh_all_collected();
+                                
+                                // Now we need to craft a meaningful message
+                                // Let's think about what users care about:
+                                // 1. Did anything change?
+                                // 2. What specifically changed?
+                                // 3. Were there any problems?
+                                
+                                // Case 1: Nothing changed at all - reassure the user
+                                if summary.updated == 0 && summary.deleted == 0 && 
+                                summary.failed == 0 && summary.inaccessible == 0 {
+                                    app.set_success_message(format!(
+                                        "✓ Collection is up to date ({} files checked)", 
+                                        summary.unchanged
+                                    ));
+                                } 
+                                // Case 2: Changes occurred - detail what happened
+                                else {
+                                    // Build a list of what changed
+                                    let mut changes = Vec::new();
+                                    
+                                    if summary.updated > 0 {
+                                        changes.push(format!("{} updated", summary.updated));
+                                    }
+                                    if summary.deleted > 0 {
+                                        changes.push(format!("{} deleted", summary.deleted));
+                                    }
+                                    if summary.inaccessible > 0 {
+                                        changes.push(format!("{} inaccessible", summary.inaccessible));
+                                    }
+                                    if summary.failed > 0 {
+                                        changes.push(format!("{} failed", summary.failed));
+                                    }
+                                    
+                                    // Determine if this is a success or partial failure
+                                    let has_problems = summary.failed > 0 || summary.inaccessible > 0;
+                                    let final_count = app.collected_files.len();
+                                    
+                                    // Craft the message with appropriate tone
+                                    let message = format!(
+                                        "Refresh complete: {} | {} → {} files",
+                                        changes.join(", "),
+                                        initial_count,
+                                        final_count
+                                    );
+                                    
+                                    if has_problems {
+                                        app.set_error_message(message);
+                                    } else {
+                                        app.set_success_message(message);
+                                    }
+                                }
+                            }
+                        }
 
                         // Copy collection to clipboard
                         KeyCode::Char('C') => {
