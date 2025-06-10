@@ -6,7 +6,7 @@ use ratatui::{
     Frame
 };
 
-use crate::{app::App, utils::get_file_display_info};
+use crate::{app::App, utils::{get_file_display_info, MEGABYTE}};
 
 /// UI is now a stateless renderer - it doesn't hold any data, just contains
 /// methods for drawing different parts of the interface
@@ -65,14 +65,24 @@ impl UI {
 
         // Add collection status
         if !app.collected_files.is_empty() {
-            let size_str = app.format_size(app.get_collection_size());
+            let size = app.get_collection_size();
+            let size_str = app.format_size(size);
+            
+            // Determine collection health with visual indicators
+            let (indicator, style) = match size {
+                s if s > 50 * MEGABYTE => ("⚠️ ", Style::default().fg(Color::Red)),
+                s if s > 25 * MEGABYTE => ("⚠️ ", Style::default().fg(Color::Yellow)),
+                _ => ("📦 ", Style::default().fg(Color::Green))
+            };
+            
             lines.push(
-                Line::from(format!(
-                    "📦 Collection: {} files ({})",
-                    app.collected_files.len(),
-                    size_str
-                ))
-                .style(Style::default().fg(Color::Yellow)),
+                Line::from(vec![
+                    Span::styled(indicator, style),
+                    Span::raw(format!("Collection: {} files ({})", 
+                        app.collected_files.len(), 
+                        size_str
+                    )),
+                ])
             );
         }
 
@@ -93,10 +103,16 @@ impl UI {
             .map(|item| {
                 let (icon, style) = get_file_display_info(item);
                 let is_collected = app.is_collected(&item.path);
-                let display_name = format!("{} {}", icon, item.name);
+                
+                // Create the display name with collection indicator
+                // We use [+] for collected files and spaces for alignment
+                let collection_marker = if is_collected { "[+]" } else { "   " };
+                let display_name = format!("{} {} {}", collection_marker, icon, item.name);
 
+                // Keep the background color as a secondary indicator
+                // This provides redundancy - users can rely on either visual cue
                 let final_style = if is_collected {
-                    style.bg(Color::Rgb(50, 50, 50)) // Dark gray background for collected
+                    style.bg(Color::Rgb(50, 50, 50))
                 } else {
                     style
                 };
@@ -125,8 +141,8 @@ impl UI {
             .block(files_block)
             .highlight_style(
                 Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
+                    .bg(Color::Rgb(80, 80, 80))  // Lighter than collection background
+                    .add_modifier(Modifier::BOLD)
             )
             .highlight_symbol("▶ ");
 
