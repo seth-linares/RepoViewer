@@ -1,16 +1,16 @@
 use std::{fs::{self}, path::{Path, PathBuf}, time::{Duration, Instant}};
 
-use git2::Repository;
 use ignore::gitignore::Gitignore;
 use ratatui::widgets::ListState;
 
-use crate::app_error::AppError;
+use crate::{app_error::AppError, utils::{find_repo, get_file_type, read_file_safely, MEGABYTE}};
 
 
 /// Main application state
 #[derive(Clone)]
 pub struct App {
     pub current_dir: PathBuf,
+    pub start_dir: PathBuf,
     pub git_root: Option<PathBuf>,
     pub items: Vec<FileItem>,
     pub collected_files: Vec<CollectedFile>,
@@ -53,30 +53,12 @@ pub struct Message {
 impl App {
     pub fn new(start_dir: PathBuf) -> Result<Self, AppError> {
         // Try to see if there's a repo where we're looking
-        let (git_root, gitignore) = match Repository::discover(&start_dir) {
-            Ok(repo) => {
-                let root = repo.workdir()
-                    .or_else(|| repo.path().parent()) // fallback to git parent
-                    .map(|p| p.to_path_buf())
-                    .ok_or(AppError::GitRepoNoParent)?;
-            
-                // Handle gitignore errors
-                let (gitignore, err) = Gitignore::new(root.join(".gitignore"));
-                if let Some(err) = err {
-                    return Err(err.into());
-                }
-
-                // Get back the possible root and gitignore
-                (Some(root), Some(gitignore))
-
-            },
-
-            Err(_) => (None, None),
-        };
+        let (git_root, gitignore) = find_repo(&start_dir)?;
 
         // Create app struct to be filled in and returned
         let mut app = App {
-            current_dir: start_dir,
+            current_dir: start_dir.clone(),
+            start_dir,
             git_root,
             items: Vec::new(),
             collected_files: Vec::new(),
@@ -92,6 +74,53 @@ impl App {
 
         Ok(app)
     }
+
+    /// Convert a FileItem to a CollectedFile, using our knowledge of the base directory
+    pub fn create_collected_file(&self, item: &FileItem) -> Result<CollectedFile, AppError> {
+        // First, check if this is even a file (not a directory)
+        if item.is_dir {
+            return Err(AppError::NotAFile);
+        }
+        
+        // Try to read the file content
+        let content = read_file_safely(&item.path, 10 * MEGABYTE)?
+            .ok_or_else(|| AppError::FileReadFailure)?;
+        
+        // Calculate the relative path
+        // Use git root if available, otherwise use the directory where we started
+        let base_path = self.git_root.as_ref().unwrap_or(&self.start_dir);
+        
+        let relative_path = match item.path.strip_prefix(base_path) {
+            Ok(rel_path) => {
+                // Successfully got a relative path
+                rel_path.to_string_lossy().to_string()
+            }
+            Err(_) => {
+                // File is outside our base directory
+                // This could happen if they navigated up past the git root
+                // In this case, we might want to use the full path
+                // or calculate relative to current_dir instead
+                item.path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| item.path.display().to_string())
+            }
+        };
+        
+        // Get the language for syntax highlighting
+        let language = get_file_type(&item.path)
+            .unwrap_or("plaintext")
+            .to_string();
+        
+        Ok(CollectedFile {
+            path: item.path.clone(),
+            relative_path,
+            content,
+            language,
+        })
+    }
+
+    
+
 
     pub fn refresh_files(&mut self) -> Result<(), AppError>{
         // Clear items out of our items vec to reset
@@ -341,5 +370,3 @@ impl App {
     }
     
 }
-
-
