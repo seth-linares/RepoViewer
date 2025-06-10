@@ -410,7 +410,7 @@ impl App {
                     Err(AppError::NotAFile) => {
                         skipped += 1;
                     }
-                    Err(e) => {
+                    Err(_) => {
                         errors += 1;
                     }
                 }
@@ -424,7 +424,7 @@ impl App {
                     Err(AppError::NotAFile) => {
                         skipped += 1;
                     }
-                    Err(e) => {
+                    Err(_) => {
                         errors += 1;
                     }
                 }
