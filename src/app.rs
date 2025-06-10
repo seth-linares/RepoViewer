@@ -253,6 +253,76 @@ impl App {
         }
     }
     
+    pub fn is_collected(&self, path: &Path) -> bool {
+        self.collected_files.iter().any(|f| f.path == path)
+    }
+    
+    pub fn get_collection_size(&self) -> usize {
+        self.collected_files.iter().map(|f| f.content.len()).sum()
+    }
+    
+    pub fn format_size(&self, bytes: usize) -> String {
+        const KB: usize = 1024;
+        const MB: usize = KB * 1024;
+        const GB: usize = MB * 1024;
+
+        if bytes >= GB {
+            format!("{:.2} GB", bytes as f64 / GB as f64)
+        } else if bytes >= MB {
+            format!("{:.2} MB", bytes as f64 / MB as f64)
+        } else if bytes >= KB {
+            format!("{:.2} KB", bytes as f64 / KB as f64)
+        } else {
+            format!("{} bytes", bytes)
+        }
+    }
+
+    pub fn save_collection_to_file(&mut self, filename: Option<String>) -> Result<(), AppError> {
+        if self.collected_files.is_empty() {
+            self.set_error_message("Collection is empty".to_string());
+            return Ok(());
+        }
+
+        let markdown = self.generate_markdown();
+        let filename = filename.unwrap_or_else(|| {
+            let now = SystemTime::now();
+            // Handle potential system time before UNIX_EPOCH
+            let since_epoch = now.duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0));
+            format!("code_context_{}.md", since_epoch.as_secs())
+        });
+
+        let output_path = self.current_dir.join(&filename);
+        std::fs::write(&output_path, markdown)?;
+
+        self.set_success_message(format!("Collection saved to {}", output_path.display()));
+        Ok(())
+    }
+
+    pub fn copy_collection_to_clipboard(&mut self) -> Result<(), AppError> {
+        if self.collected_files.is_empty() {
+            self.set_error_message("Collection is empty".to_string());
+            return Ok(());
+        }
+
+        let markdown = self.generate_markdown();
+        
+        #[cfg(feature = "clipboard")]
+        {
+            use arboard::Clipboard;
+            Clipboard::new()?.set_text(markdown)?;
+            self.set_success_message("Collection copied to clipboard!".to_string());
+        }
+        
+        #[cfg(not(feature = "clipboard"))]
+        {
+            return Err(AppError::UnsupportedOperation(
+                "Clipboard support not compiled. Use --features clipboard".to_string(),
+            ));
+        }
+        
+        Ok(())
+    }
 }
 
 
@@ -318,18 +388,109 @@ impl App {
     }
     
     pub fn add_all_files_in_dir(&mut self) -> Result<(), AppError> {
-        // Iterate through current directory, add all text files
-        todo!()
+        let mut added = 0;
+        let mut updated = 0;
+        let mut skipped = 0;
+        let mut errors = 0;
+
+        for item in &self.items {
+            if item.is_dir {
+                skipped += 1;
+                continue;
+            }
+
+            // Check if file is already collected
+            if let Some(index) = self.collected_files.iter().position(|f| f.path == item.path) {
+                // File already exists - update it
+                match self.create_collected_file(item) {
+                    Ok(new_file) => {
+                        self.collected_files[index] = new_file;
+                        updated += 1;
+                    }
+                    Err(AppError::NotAFile) => {
+                        skipped += 1;
+                    }
+                    Err(e) => {
+                        errors += 1;
+                    }
+                }
+            } else {
+                // New file - add to collection
+                match self.create_collected_file(item) {
+                    Ok(new_file) => {
+                        self.collected_files.push(new_file);
+                        added += 1;
+                    }
+                    Err(AppError::NotAFile) => {
+                        skipped += 1;
+                    }
+                    Err(e) => {
+                        errors += 1;
+                    }
+                }
+            }
+        }
+
+        let total = self.collected_files.len();
+        let size_str = self.format_size(self.get_collection_size());
+        self.set_success_message(format!(
+            "Added {} files, updated {}, skipped {} (errors: {}) - Total: {} files ({})",
+            added, updated, skipped, errors, total, size_str
+        ));
+
+        Ok(())
     }
     
     pub fn remove_current_file(&mut self) -> Result<(), AppError> {
-        // Find and remove from collected_files vec
-        todo!()
+        let current_item = match self.current_selection() {
+            Some(item) => item,
+            None => {
+                self.set_error_message("No file selected".to_string());
+                return Ok(());
+            }
+        };
+
+        if current_item.is_dir {
+            self.set_error_message("Cannot remove directories from collection".to_string());
+            return Ok(());
+        }
+
+        // Clone path to avoid borrowing issues
+        let path_to_remove = current_item.path.clone();
+        let name = current_item.name.clone();
+        
+        // Find index without holding a reference to collected_files
+        let index = self.collected_files.iter().position(|f| f.path == path_to_remove);
+        
+        if let Some(index) = index {
+            // Remove the file from the collection
+            let removed_file = self.collected_files.swap_remove(index);
+            let size_kb = removed_file.content.len() / 1024;
+            self.set_success_message(format!(
+                "Removed {} ({} KB) - Total: {} files",
+                name, size_kb, self.collected_files.len()
+            ));
+        } else {
+            self.set_error_message(format!(
+                "{} is not in the collection",
+                name
+            ));
+        }
+
+        Ok(())
     }
     
     pub fn clear_collection(&mut self) -> Result<(), AppError> {
-        // Simply clear the vec and show message
-        todo!()
+        if self.collected_files.is_empty() {
+            self.set_error_message("Collection is already empty".to_string());
+            return Ok(());
+        }
+
+        let count = self.collected_files.len();
+        self.collected_files.clear();
+        self.set_success_message(format!("Cleared {} files from collection", count));
+
+        Ok(())
     }
 
     pub fn generate_markdown(&self) -> String {
@@ -627,12 +788,14 @@ impl App {
             use std::os::windows::fs::MetadataExt;
             if let Ok(metadata) = path.metadata() {
                 let attributes = metadata.file_attributes();
-                // FILE_ATTRIBUTE_HIDDEN = 0x2 so we check if there is 2
                 if (attributes & 2) != 0 {
                     return true;
                 }
             }
         }
+
+        #[cfg(not(windows))]
+        let _ = path; // Suppress unused parameter warning
 
         // -- else AND for linux/unix we can just check for the `.` prefix 
         name.starts_with('.')
