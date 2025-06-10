@@ -507,9 +507,9 @@ impl App {
             output.push_str(&format!("\n## {}\n\n", file.relative_path));
             
             // Add code block with syntax highlighting
-            output.push_str(&format!("```{}\n", file.language));
+            output.push_str(&format!("````{}", file.language));
             output.push_str(&file.content);
-            output.push_str("\n```\n");
+            output.push_str("\n````\n");
         }
         
         output
@@ -546,7 +546,7 @@ impl App {
     }
     
     /// Refresh a single collected file if it has changed
-    pub fn refresh_collected_file(&mut self, index: usize) -> Result<RefreshResult, AppError> {
+    fn refresh_collected_file(&mut self, index: usize) -> Result<RefreshResult, AppError> {
         if index >= self.collected_files.len() {
             return Err(AppError::LogicError("Invalid collection index".to_string()));
         }
