@@ -150,6 +150,33 @@ fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
 
+                        // --- Collection Controls ---
+                        // Add current file to collection
+                        KeyCode::Char('a') => app.add_current_file()?,
+
+                        // Add all files in current directory to collection
+                        KeyCode::Char('A') => app.add_all_files_in_dir()?,
+
+                        // Remove current file from collection
+                        KeyCode::Char('d') => app.remove_current_file()?,
+                        
+                        // Clear entire collection
+                        KeyCode::Char('D') => app.clear_collection()?,
+
+                        // Save collection to markdown file
+                        KeyCode::Char('S') => {
+                            if let Err(e) = app.save_collection_to_file(None) {
+                                app.set_error_message(format!("Failed to save file: {}", e));
+                            }
+                        },
+
+                        // Copy collection to clipboard
+                        KeyCode::Char('C') => {
+                            if let Err(e) = app.copy_collection_to_clipboard() {
+                                app.set_error_message(format!("Clipboard error: {}", e));
+                            }
+                        },
+
                         // Navigation
                         KeyCode::Up => {
                             if let Some(selected) = app.state.selected() {
