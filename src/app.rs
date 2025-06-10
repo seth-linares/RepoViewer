@@ -272,7 +272,7 @@ impl App {
             return Ok(());
         }
 
-        // Create collected file early
+        // Create collected file early to ensure it is a readable file as well as prevent mutability conflicts
         let new_collected_file = match self.create_collected_file(current_item) {
             Ok(file) => file,
             Err(AppError::NotAFile) => {
