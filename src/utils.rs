@@ -448,6 +448,7 @@ pub fn get_file_type(path: &Path) -> Option<&'static str> {
     None
 }
 
+/// Weed out non-text files and safely read them
 pub fn read_file_safely(path: &Path, max_size: usize) -> Result<String, AppError> {
     // Check if file type is whitelisted
     if get_file_type(path).is_none() {
@@ -469,31 +470,40 @@ pub fn read_file_safely(path: &Path, max_size: usize) -> Result<String, AppError
     // Read the file
     let contents = fs::read(path)?;
     
-    // Check for binary content
+    // Check for binary content (null bytes are a strong indicator)
     if contents.contains(&0) {
         return Err(AppError::BinaryFile);
     }
     
     // Check for excessive control characters
+    // Text files might have some control chars (tabs, newlines)
+    // but too many suggests binary content
     let control_char_count = contents.iter()
         .filter(|&&b| {
+            // Count control chars except common text formatting ones
             (b < 0x20 || b == 0x7F) && !matches!(b, b'\t' | b'\n' | b'\r')
         })
         .count();
     
+    // If more than 5% of the file is control characters, it's probably binary
     if control_char_count > contents.len() / 20 {
         return Err(AppError::BinaryFile);
     }
     
-    // Convert to UTF-8
+    // Try to convert to UTF-8
     match String::from_utf8(contents) {
         Ok(string) => Ok(string),
         Err(e) => {
+            // Let's be forgiving with encoding issues
+            // Some text files might have a few bad bytes
             let lossy = String::from_utf8_lossy(e.as_bytes());
+            
+            // Count how many replacement characters we'd need
             let replacement_count = lossy.chars()
-                .filter(|&c| c == '\u{FFFD}')
+                .filter(|&c| c == '\u{FFFD}') // Unicode replacement character
                 .count();
             
+            // If less than 0.1% of characters need replacement, accept it
             if replacement_count < lossy.len() / 1000 {
                 Ok(lossy.into_owned())
             } else {
