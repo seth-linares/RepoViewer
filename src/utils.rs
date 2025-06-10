@@ -1,11 +1,16 @@
+use git2::Repository;
+use ignore::gitignore::Gitignore;
 use ratatui::style::{Color, Modifier, Style};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::app::FileItem;
 use crate::app_error::AppError;
+
+pub const MEGABYTE: usize = 1024 * 1024;
 
 /*
     ---UI UTIL---
@@ -253,6 +258,32 @@ pub fn parse_target_dir(path_arg: Option<String>) -> Result<PathBuf, AppError> {
     }
 }
 
+/// Get git root and gitignore if they exist
+pub fn find_repo(path: &Path) -> Result<(Option<PathBuf>, Option<Gitignore>), AppError> {
+    let (git_root, gitignore) = match Repository::discover(path) {
+            Ok(repo) => {
+                let root = repo.workdir()
+                    .or_else(|| repo.path().parent()) // fallback to git parent
+                    .map(|p| p.to_path_buf())
+                    .ok_or(AppError::GitRepoNoParent)?;
+            
+                // Handle gitignore errors
+                let (gitignore, err) = Gitignore::new(root.join(".gitignore"));
+                if let Some(err) = err {
+                    return Err(err.into());
+                }
+
+                // Get back the possible root and gitignore
+                (Some(root), Some(gitignore))
+
+            },
+
+            Err(_) => (None, None),
+        };
+
+        Ok((git_root, gitignore))
+}
+
 /*
     ---FILE READING UTIL---
 */
@@ -419,21 +450,62 @@ pub fn get_file_type(path: &Path) -> Option<&'static str> {
 }
 
 pub fn read_file_safely(path: &Path, max_size: usize) -> Result<Option<String>, AppError> {
-
-    // Make sure the file is even worth checking and in our whitelist!
+    // Step 1: Check if file type is whitelisted
     if get_file_type(path).is_none() {
         return Ok(None);
     }
     
-    // Get the metadata for the file so that we can know size, 
+    // Step 2: Get metadata and check size
     let metadata = fs::metadata(path)?;
-
-    // Check if the file is too large
     if metadata.len() > max_size as u64 {
         return Ok(None);
     }
-
-
     
-    todo!()
+    // Step 3: Read the entire file at once (simpler and still safe due to size check)
+    let contents = fs::read(path)?;
+    
+    // Step 4: Validate size again (in case file grew during read)
+    if contents.len() > max_size {
+        return Ok(None);
+    }
+    
+    // Step 5: Check for binary content
+    // Check for null bytes (strongest indicator of binary)
+    if contents.contains(&0) {
+        return Ok(None);
+    }
+    
+    // Check for excessive control characters
+    let control_char_count = contents.iter()
+        .filter(|&&b| {
+            // Count bytes that are control characters but not common whitespace
+            (b < 0x20 || b == 0x7F) && !matches!(b, b'\t' | b'\n' | b'\r')
+        })
+        .count();
+    
+    // Reject if more than 5% control characters (more strict than 10%)
+    if control_char_count > contents.len() / 20 {
+        return Ok(None);
+    }
+    
+    // Step 6: Convert to UTF-8
+    match String::from_utf8(contents) {
+        Ok(string) => Ok(Some(string)),
+        Err(e) => {
+            // For files with minor UTF-8 issues, use lossy conversion
+            let lossy = String::from_utf8_lossy(e.as_bytes());
+            
+            // Count replacement characters
+            let replacement_count = lossy.chars()
+                .filter(|&c| c == '\u{FFFD}')
+                .count();
+            
+            // Accept if less than 0.1% of characters are replacements
+            if replacement_count < lossy.len() / 1000 {
+                Ok(Some(lossy.into_owned()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
 }
