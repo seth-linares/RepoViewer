@@ -118,9 +118,26 @@ fn run_app<B: ratatui::backend::Backend>(
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    // If help is shown, only handle help-closing keys
+                    if app.show_help {
+                        match key.code {
+                            KeyCode::Char('?') | KeyCode::Esc => {
+                                app.show_help = false;
+                            }
+                            _ => {} // Ignore all other keys when help is shown
+                        }
+                        continue; // Skip the rest of the event handling
+                    }
+                    
+                    // Normal key handling when help is not shown
                     match key.code {
                         // Quit
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+
+                        // Show help overlay
+                        KeyCode::Char('?') => {
+                            app.show_help = true;
+                        }
 
                         // Toggle hidden files
                         KeyCode::Char('h') => {
@@ -152,10 +169,10 @@ fn run_app<B: ratatui::backend::Backend>(
 
                         // --- Collection Controls ---
                         
-                        // Add current file to collection
+                        // Add current file to collection (enhanced with warnings)
                         KeyCode::Char('a') => app.add_current_file()?,
 
-                        // Add all files in current directory to collection
+                        // Add all files in current directory to collection (enhanced with warnings)
                         KeyCode::Char('A') => app.add_all_files_in_dir()?,
 
                         // Remove current file from collection
