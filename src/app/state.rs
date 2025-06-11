@@ -40,7 +40,7 @@ pub enum RefreshResult {
     Updated,
     FileDeleted,
     FileInaccessible,
-    Failed(String),
+    Failed,
 }
 
 /// Summary of refreshing all collected files
