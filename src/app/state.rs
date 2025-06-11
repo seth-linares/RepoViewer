@@ -195,7 +195,7 @@ impl App {
 
     /// Get a display-friendly path for status messages
     /// This provides shorter, more readable paths in the UI
-    pub(super) fn get_display_path(&self, path: &Path) -> String {
+    pub fn get_display_path(&self, path: &Path) -> String {
         // This method provides a shorter, more readable path for status messages
         // It prioritizes showing the most relevant context
         
