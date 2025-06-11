@@ -266,6 +266,8 @@ fn run_app<B: ratatui::backend::Backend>(
                                     }
                                 }
                             }
+
+                            app.refresh_files()?;
                         }
 
                         // Copy collection to clipboard
