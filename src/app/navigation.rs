@@ -5,7 +5,7 @@
 //! traversal and navigation features.
 
 use super::App;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use crate::app_error::AppError;
 
 impl App {
@@ -114,57 +114,8 @@ impl App {
         let start_dir = self.start_dir.clone();
         self.navigate_to_path(start_dir)
     }
-
-    /// Get a list of parent directories up to the start directory
-    /// This could be used for a quick-jump menu
-    pub fn get_parent_directories(&self) -> Vec<(String, PathBuf)> {
-        let mut parents = Vec::new();
-        let mut current = self.current_dir.clone();
-        
-        while let Some(parent) = current.parent() {
-            // Stop if we've reached the start directory's parent
-            if parent == self.start_dir.parent().unwrap_or(Path::new("/")) {
-                break;
-            }
-            
-            let name = parent
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "/".to_string());
-            
-            parents.push((name, parent.to_path_buf()));
-            current = parent.to_path_buf();
-        }
-        
-        parents
-    }
-
-    /// Find the common ancestor between current directory and a target path
-    /// Useful for understanding the relationship between paths
-    pub fn find_common_ancestor(&self, target: &Path) -> Option<PathBuf> {
-        let current_components: Vec<_> = self.current_dir.components().collect();
-        let target_components: Vec<_> = target.components().collect();
-        
-        let mut common_path = PathBuf::new();
-        
-        for (current_comp, target_comp) in current_components.iter()
-            .zip(target_components.iter()) 
-        {
-            if current_comp == target_comp {
-                common_path.push(current_comp);
-            } else {
-                break;
-            }
-        }
-        
-        if common_path.as_os_str().is_empty() {
-            None
-        } else {
-            Some(common_path)
-        }
-    }
 }
 
-// Note: Tree generation functions will go in export.rs since they're
+// Note: Tree generation functions are in export.rs since they're
 // primarily about exporting/displaying directory structure rather than
 // navigating it.
