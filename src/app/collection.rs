@@ -406,13 +406,13 @@ impl App {
                             Ok(RefreshResult::NoChange)
                         }
                     }
-                    Err(e) => Ok(RefreshResult::Failed(e.to_string())),
+                    Err(_) => Ok(RefreshResult::Failed),
                 }
             }
             FileStatus::Deleted => Ok(RefreshResult::FileDeleted),
             FileStatus::Inaccessible => Ok(RefreshResult::FileInaccessible),
-            FileStatus::NotAFile => Ok(RefreshResult::Failed("No longer a file".to_string())),
-            FileStatus::Unknown => Ok(RefreshResult::Failed("Cannot check status".to_string())),
+            FileStatus::NotAFile => Ok(RefreshResult::Failed),
+            FileStatus::Unknown => Ok(RefreshResult::Failed),
         }
     }
     
@@ -443,7 +443,7 @@ impl App {
                     summary.inaccessible += 1;
                     indices_to_remove.push(index);
                 }
-                Ok(RefreshResult::Failed(_)) => summary.failed += 1,
+                Ok(RefreshResult::Failed) => summary.failed += 1,
                 Err(_) => summary.failed += 1,
             }
         }
