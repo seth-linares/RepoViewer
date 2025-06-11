@@ -259,28 +259,29 @@ pub fn parse_target_dir(path_arg: Option<String>) -> Result<PathBuf, AppError> {
 
 /// Get git root and gitignore if they exist
 pub fn find_repo(path: &Path) -> Result<(Option<PathBuf>, Option<Gitignore>), AppError> {
-    let (git_root, gitignore) = match Repository::discover(path) {
-            Ok(repo) => {
-                let root = repo.workdir()
-                    .or_else(|| repo.path().parent()) // fallback to git parent
-                    .map(|p| p.to_path_buf())
-                    .ok_or(AppError::GitRepoNoParent)?;
+    match Repository::discover(path) {
+        Ok(repo) => {
+            let root = repo.workdir()
+                .or_else(|| repo.path().parent())
+                .map(|p| p.to_path_buf())
+                .ok_or(AppError::GitRepoNoParent)?;
             
-                // Handle gitignore errors
-                let (gitignore, err) = Gitignore::new(root.join(".gitignore"));
+            // Build gitignore, but don't fail if the file doesn't exist
+            let gitignore_path = root.join(".gitignore");
+            let gitignore = if gitignore_path.exists() {
+                let (ignore, err) = Gitignore::new(&gitignore_path);
                 if let Some(err) = err {
-                    return Err(err.into());
+                    eprintln!("Warning: Error parsing .gitignore: {}", err);
                 }
-
-                // Get back the possible root and gitignore
-                (Some(root), Some(gitignore))
-
-            },
-
-            Err(_) => (None, None),
-        };
-
-        Ok((git_root, gitignore))
+                Some(ignore)
+            } else {
+                None
+            };
+            
+            Ok((Some(root), gitignore))
+        },
+        Err(_) => Ok((None, None)),
+    }
 }
 
 /*
