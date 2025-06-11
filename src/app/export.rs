@@ -24,8 +24,16 @@ impl App {
         // Add a header explaining what this document contains
         // This context helps both humans and LLMs understand the document's purpose
         output.push_str("# Code Context\n\n");
-        output.push_str(&format!("Generated from: {}\n\n", 
-            self.git_root.as_ref().unwrap_or(&self.start_dir).display()));
+        
+        // Use display path for the source directory to keep the header clean
+        // This makes the document header more readable while still providing context
+        let source_display = if let Some(git_root) = &self.git_root {
+            self.get_display_path(git_root)
+        } else {
+            self.get_display_path(&self.start_dir)
+        };
+        
+        output.push_str(&format!("Generated from: {}\n\n", source_display));
         
         // For each collected file, create a section with proper formatting
         for file in &self.collected_files {
@@ -74,8 +82,22 @@ impl App {
         let output_path = self.current_dir.join(&filename);
         fs::write(&output_path, markdown)?;
 
-        // Provide feedback with the full path so users know where to find it
-        self.set_success_message(format!("Collection saved to {}", output_path.display()));
+        // Provide feedback with a friendly display path
+        // This makes the success message much more readable, especially when
+        // the user is deep in a directory structure
+        let display_path = self.get_display_path(&output_path);
+        
+        // Include file count and size information for user awareness
+        let total_size = self.get_collection_size();
+        let size_str = self.format_size(total_size);
+        
+        self.set_success_message(format!(
+            "Saved {} files ({}) to {}", 
+            self.collected_files.len(),
+            size_str,
+            display_path
+        ));
+        
         Ok(())
     }
 
@@ -92,6 +114,10 @@ impl App {
 
         let markdown = self.generate_markdown();
         
+        // Calculate the size of what we're copying to provide better feedback
+        let size_str = self.format_size(markdown.len());
+        let file_count = self.collected_files.len();
+        
         // Handle clipboard operations with feature flag
         // This allows the crate to compile without clipboard support if needed
         #[cfg(feature = "clipboard")]
@@ -99,7 +125,13 @@ impl App {
             use arboard::Clipboard;
             // Create a new clipboard context for this operation
             Clipboard::new()?.set_text(markdown)?;
-            self.set_success_message("Collection copied to clipboard!".to_string());
+            
+            // Provide detailed success feedback so users know what was copied
+            self.set_success_message(format!(
+                "Copied {} files ({}) to clipboard!",
+                file_count,
+                size_str
+            ));
         }
         
         #[cfg(not(feature = "clipboard"))]
@@ -120,9 +152,11 @@ impl App {
     pub fn generate_tree(&self, max_depth: Option<usize>) -> Result<String, AppError> {
         let mut output = String::new();
         
-        // Start with the absolute path as context
-        // This helps users understand exactly what directory structure they're looking at
-        output.push_str(&format!("{}\n", self.current_dir.display()));
+        // Start with a friendly display path instead of absolute path
+        // This makes the tree output cleaner and more focused on structure
+        // rather than system-specific paths
+        let root_display = self.get_display_path(&self.current_dir);
+        output.push_str(&format!("{}\n", root_display));
         
         // Recursively build the tree structure
         self.generate_tree_recursive(&self.current_dir, &mut output, "", 0, max_depth)?;
@@ -218,13 +252,22 @@ impl App {
     /// This provides a quick way to share project structure without
     /// having to save it to a file first.
     #[cfg(feature = "clipboard")]
-    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
+    pub fn copy_tree_to_clipboard(&mut self) -> Result<(), AppError> {
         use arboard::Clipboard;
 
         let tree = self.generate_tree(None)?;
         
+        // Calculate the size for better user feedback
+        let size_str = self.format_size(tree.len());
+        
         Clipboard::new()?
             .set_text(tree)?;
+        
+        // Provide informative success message
+        self.set_success_message(format!(
+            "Tree ({}) copied to clipboard!",
+            size_str
+        ));
 
         Ok(())
     }

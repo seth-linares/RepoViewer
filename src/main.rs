@@ -151,7 +151,10 @@ fn run_app<B: ratatui::backend::Backend>(
                             let tree = app.generate_tree(None)?;
                             let output_file = app.current_dir.join("tree.txt");
                             std::fs::write(&output_file, tree)?;
-                            app.set_success_message(format!("Tree saved to {}", output_file.display()));
+                            
+                            // Use display path for cleaner feedback
+                            let display_path = app.get_display_path(&output_file);
+                            app.set_success_message(format!("Tree saved to {}", display_path));
                         }
                         
                         // Copy tree to clipboard
