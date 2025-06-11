@@ -44,11 +44,6 @@ pub enum AppError {
     #[error("File encoding error: too many invalid UTF-8 sequences")]
     EncodingError,
 
-
-    /// Failed to read from a FileItem during conversion
-    #[error("Failed to read from a FileItem")]
-    FileReadFailure,
-
     /// Invalid path provided or determined
     #[error("Invalid path: {0}")]
     InvalidPath(String),
