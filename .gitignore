@@ -2,8 +2,8 @@
 target/
 **/*.rs.bk
 
-# Cargo package files
-Cargo.lock
+# # Cargo package files
+# Cargo.lock
 
 # Executables (Linux, Windows)
 *.exe
@@ -28,5 +28,6 @@ Thumbs.db
 
 # Logs
 *.log
+
 src/feature_vision.md
 src/guide.md
