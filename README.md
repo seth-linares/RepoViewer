@@ -12,7 +12,7 @@ A TUI file explorer for quickly gathering repo metadata and file content.
 cargo install --git https://github.com/seth-linares/RepoViewer
 ```
 
-Or clone and build from source:
+Or if you want to clone and build it yourself:
 
 ```bash
 git clone https://github.com/seth-linares/RepoViewer
