@@ -9,7 +9,6 @@ use std::{
     time::Duration,
 };
 
-use app::App;
 use app_error::AppError;
 use clap::Parser;
 use crossterm::{
