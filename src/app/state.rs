@@ -4,7 +4,7 @@
 //! including messages, file status tracking, and UI helper functions.
 
 use super::App;
-use crate::utils::MEGABYTE;
+use crate::{app_error::AppError, utils::MEGABYTE};
 use std::{
     path::Path,
     time::{Duration, Instant, SystemTime},
@@ -86,7 +86,7 @@ impl App {
         }
     }
 
-    /// Get contextual hints based on current state
+    /// Get contextual UI hints based on current state
     /// These hints guide new users and provide helpful reminders
     pub fn get_contextual_hint(&self) -> Option<String> {
         // Priority order for hints - show the most relevant one
@@ -228,6 +228,8 @@ impl App {
     ///     - If the file is in a subdirectory: shows "./subdir/file.txt"
     ///     - If the file is outside the current directory: calculates a relative path ("../otherdir/file.txt")
     ///     Fallback: shows the full path if relative path calculation fails
+    /// 
+    /// Used for: temporary status messages, success/error notifications
     pub fn get_display_path(&self, path: &Path) -> String {
     
         // So here we are trying to strip the absolute paths
@@ -298,12 +300,25 @@ impl App {
         is_dot_file
     }
 
-    /// Calculate relative path with better error handling
-    /// This provides meaningful paths for collected files
-    pub(super) fn calculate_relative_path(&self, path: &Path) -> Result<String, crate::app_error::AppError> {
+    /// Calculate a stable relative path for persistent storage.
+    /// 
+    /// This function prioritizes consistency across the entire project.
+    /// It always tries to create paths relative to the git root or start
+    /// directory, ensuring that collected files have predictable paths
+    /// regardless of where the user was when they collected them.
+    /// 
+    /// # Examples
+    /// 
+    /// From git root `/project/`:
+    /// - `/project/src/main.rs` -> `"src/main.rs"`
+    /// - `/project/tests/test.rs` -> `"tests/test.rs"`
+    /// - `/home/user/other.rs` -> `"user/other.rs"` (fallback)
+    /// 
+    /// Used for: collected file storage, markdown export
+    pub(super) fn calculate_relative_path(&self, path: &Path) -> Result<String, AppError> {
         // Try multiple strategies to get a meaningful relative path
         
-        // First, try relative to git root
+        // First if we have a git root use that
         if let Some(git_root) = &self.git_root {
             if let Ok(rel_path) = path.strip_prefix(git_root) {
                 return Ok(rel_path.to_string_lossy().to_string());
@@ -315,7 +330,7 @@ impl App {
             return Ok(rel_path.to_string_lossy().to_string());
         }
         
-        // Finally, try relative to current directory
+        // Finally try relative to working dir
         if let Ok(rel_path) = path.strip_prefix(&self.current_dir) {
             // Prefix with current dir name to provide context
             let current_dir_name = self.current_dir
@@ -325,7 +340,7 @@ impl App {
             return Ok(format!("{}/{}", current_dir_name, rel_path.to_string_lossy()));
         }
         
-        // Enhanced fallback: Always include parent directory context
+        // now we have another fallback: always include parent directory context
         // This ensures users understand where the file is located even in edge cases
         
         // Get the parent directory name, handling edge cases
@@ -370,9 +385,11 @@ impl App {
         // Handle special cases for very long paths
         let relative_path = format!("{}/{}", parent_name, file_name);
         
-        // If the path is too long, truncate the parent portion but keep the filename intact
+        // If the path is too long get rid of the parent portion but keep the filename intact
         if relative_path.len() > 60 {
             let max_parent_len = 60_usize.saturating_sub(file_name.len() + 4); // 4 for ".../"
+
+            // check the length the possibly truncate
             if parent_name.len() > max_parent_len && max_parent_len > 3 {
                 let truncated_parent = format!("...{}", &parent_name[parent_name.len() - max_parent_len + 3..]);
                 Ok(format!("{}/{}", truncated_parent, file_name))

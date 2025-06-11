@@ -3,6 +3,8 @@
 //! While core navigation (navigate_into, navigate_up) lives in mod.rs,
 //! this module contains helper functions and extensions for directory
 //! traversal and navigation features.
+//! 
+
 
 use super::App;
 use std::path::PathBuf;
@@ -22,6 +24,8 @@ impl App {
 
     /// Get a breadcrumb trail from the start directory to current directory
     /// Returns a vector of (name, full_path) tuples
+    /// 
+    /// This let's us create the really nice displays like `RepoViewer > src > app`
     pub fn get_breadcrumbs(&self) -> Vec<(String, PathBuf)> {
         let mut breadcrumbs = Vec::new();
         let mut current = self.current_dir.clone();
@@ -115,7 +119,3 @@ impl App {
         self.navigate_to_path(start_dir)
     }
 }
-
-// Note: Tree generation functions are in export.rs since they're
-// primarily about exporting/displaying directory structure rather than
-// navigating it.

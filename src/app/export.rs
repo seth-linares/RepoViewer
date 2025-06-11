@@ -15,9 +15,11 @@ use std::{
 impl App {
     /// Generate a markdown document from all collected files
     /// 
-    /// This creates a structured markdown document thats optimized for giving to LLM apis
-    /// Each file is presented with a clear header showing its path, followed by a
-    /// syntax-highlighted code block containing the file's content.
+    /// 
+    /// This is the main function that actually provides the formatting for the file contents
+    /// and encases them in "`" and the markdown language "code"(?)
+    /// 
+    /// We provide the path as the header and then it is followed by the encased file contents
     pub fn generate_markdown(&self) -> String {
         let mut output = String::new();
         
@@ -38,16 +40,15 @@ impl App {
         
         output.push_str(&format!("Generated from: {}\n\n", source_display));
         
-        // For each collected file, create a section with proper formatting
+        // For each collected file create a section with proper formatting
         for file in &self.collected_files {
-            // Add file header - using ## makes it easy to navigate between files
+            // Add file header using ## to provide files relative path
             output.push_str(&format!("\n## {}\n\n", file.relative_path));
             
-            // Add code block with syntax highlighting
-            // The language hint helps both markdown renderers and LLMs understand the code
+            // Add code block with syntax highlighting via language name/code thing
             output.push_str(&format!("````{}\n", file.language));
             output.push_str(&file.content);
-            // Ensure the code block is properly closed even if file doesn't end with newline
+            // Ensure the code block is properly closed even if file doesnt end with newline
             if !file.content.ends_with('\n') {
                 output.push('\n');
             }
@@ -59,7 +60,7 @@ impl App {
 
     /// Save the collection to a markdown file in the current directory
     /// 
-    /// If no filename is provided, generates one with a timestamp to avoid
+    /// If no filename is provided generates one with a timestamp to avoid
     /// overwriting existing files. This makes it safe to export multiple times.
     pub fn save_collection_to_file(&mut self, filename: Option<String>) -> Result<(), AppError> {
         // Check if we have anything to save
@@ -105,9 +106,6 @@ impl App {
     }
 
     /// Copy the markdown collection to the system clipboard
-    /// 
-    /// This is often the most convenient way to share code with LLMs,
-    /// as you can paste directly into a chat interface.
     pub fn copy_collection_to_clipboard(&mut self) -> Result<(), AppError> {
         // Check if we have anything to copy
         if self.collected_files.is_empty() {
@@ -117,7 +115,7 @@ impl App {
 
         let markdown = self.generate_markdown();
         
-        // Calculate the size of what we're copying to provide better feedback
+        // Calculate the size of what we're copying to let people know how much they copied
         let size_str = self.format_size(markdown.len());
         let file_count = self.collected_files.len();
         
@@ -149,9 +147,12 @@ impl App {
 
     /// Generate a tree structure string of the current directory
     /// 
-    /// This creates a visual representation of the directory structure,
-    /// similar to the Unix 'tree' command. It's useful for giving LLMs
-    /// an overview of project structure without including file contents.
+    /// This creates a visual representation of the directory structure which is
+    /// one of the major features of this program. Having the ability to easily get
+    /// the tree structure of repos is super helpful when providing context/metadata
+    /// about projects and was techincally the reason I made this! 🐈🐈🐈
+    /// 
+    /// This is just the public facing function, the actual function is recursive and priv
     pub fn generate_tree(&self, max_depth: Option<usize>) -> Result<String, AppError> {
         let mut output = String::new();
         
@@ -161,7 +162,7 @@ impl App {
         let root_display = self.get_display_path(&self.current_dir);
         output.push_str(&format!("{}\n", root_display));
         
-        // Recursively build the tree structure
+        // call our recursive which has the actual logic
         self.generate_tree_recursive(&self.current_dir, &mut output, "", 0, max_depth)?;
 
         Ok(output)
