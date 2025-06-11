@@ -42,13 +42,13 @@ impl App {
             
             // Add code block with syntax highlighting
             // The language hint helps both markdown renderers and LLMs understand the code
-            output.push_str(&format!("```{}\n", file.language));
+            output.push_str(&format!("````{}\n", file.language));
             output.push_str(&file.content);
             // Ensure the code block is properly closed even if file doesn't end with newline
             if !file.content.ends_with('\n') {
                 output.push('\n');
             }
-            output.push_str("```\n");
+            output.push_str("````\n");
         }
         
         output
