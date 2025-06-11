@@ -146,6 +146,23 @@ fn run_app<B: ratatui::backend::Backend>(
                             app.refresh_files()?;
                         }
 
+                        // Quick navigation shortcuts
+                        KeyCode::Char('~') => {
+                            if app.current_dir != app.start_dir {
+                                if let Err(e) = app.navigate_to_start() {
+                                    app.set_error_message(format!("Failed to navigate to start: {}", e));
+                                }
+                            }
+                        }
+
+                        KeyCode::Char('G') => {
+                            if app.git_root.is_some() && app.git_root != Some(app.current_dir.clone()) {
+                                if let Err(e) = app.navigate_to_git_root() {
+                                    app.set_error_message(format!("Failed to navigate to git root: {}", e));
+                                }
+                            }
+                        }
+
                         // Save tree to file
                         KeyCode::Char('t') => {
                             let tree = app.generate_tree(None)?;
@@ -275,8 +292,17 @@ fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
 
-                        KeyCode::Left => app.navigate_up()?,
-                        KeyCode::Right | KeyCode::Enter => app.navigate_into()?,
+                        KeyCode::Left => {
+                            if app.can_navigate_up() {
+                                app.navigate_up()?;
+                            }
+                        }
+                        
+                        KeyCode::Right | KeyCode::Enter => {
+                            if app.can_navigate_into_selection() {
+                                app.navigate_into()?;
+                            }
+                        }
 
                         // Home/PageUp - go to the first item
                         KeyCode::Home | KeyCode::PageUp => {
