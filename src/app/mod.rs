@@ -97,9 +97,13 @@ impl App {
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
 
-                // Get rid of `.git` since it's just git metadata anyways 
-                // Check if this is a file that is hidden or ignored while those are meant to be hidden
-                if name == ".git" && !self.should_include_file(&path, &name, path.is_dir()) {
+                // Always exclude .git directory
+                if name == ".git" {
+                    return None;
+                }
+                
+                // Check visibility settings for all other files
+                if !self.should_include_file(&path, &name, path.is_dir()) {
                     return None;
                 }
 

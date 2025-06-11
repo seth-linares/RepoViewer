@@ -15,22 +15,25 @@ use std::{
 impl App {
     /// Generate a markdown document from all collected files
     /// 
-    /// This creates a structured markdown document that's optimized for LLM consumption.
+    /// This creates a structured markdown document thats optimized for giving to LLM apis
     /// Each file is presented with a clear header showing its path, followed by a
     /// syntax-highlighted code block containing the file's content.
     pub fn generate_markdown(&self) -> String {
         let mut output = String::new();
         
-        // Add a header explaining what this document contains
-        // This context helps both humans and LLMs understand the document's purpose
         output.push_str("# Code Context\n\n");
         
-        // Use display path for the source directory to keep the header clean
-        // This makes the document header more readable while still providing context
+        // We would like to get a source to display for our markdown file for more info
         let source_display = if let Some(git_root) = &self.git_root {
-            self.get_display_path(git_root)
+            // For git repos, show the repository name (last component of path)
+            git_root.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| git_root.to_string_lossy().to_string())
         } else {
-            self.get_display_path(&self.start_dir)
+            // For non-git directories, show the directory name
+            self.start_dir.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| self.start_dir.to_string_lossy().to_string())
         };
         
         output.push_str(&format!("Generated from: {}\n\n", source_display));

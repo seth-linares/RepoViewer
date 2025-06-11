@@ -1,13 +1,14 @@
 //! File collection functionality for the RepoViewer application.
 //! 
-//! This module manages the core feature of RepoViewer - collecting files
+//! This module manages the feature that lets us collect file contents
 //! from various directories and maintaining them as a cohesive collection
 //! that can be exported for sharing with LLMs or documentation purposes.
 //! 
-//! The collection system is designed to handle the dynamic nature of
-//! software development, where files are constantly being edited, moved,
+//! The collection system is designed to handle environments, 
+//! where files are constantly being edited, moved,
 //! and deleted. It provides change detection and synchronization to keep
-//! the collection up-to-date with the filesystem.
+//! the collection updated with the filesystem.
+//! 
 
 use super::{App, FileItem};
 use super::state::{FileStatus, RefreshResult, RefreshSummary};
@@ -22,22 +23,15 @@ use std::{
 };
 
 /// Represents a file that has been collected for export
-/// 
-/// This struct is more than just file content - it's a complete snapshot
-/// of a file at a specific point in time. The metadata allows us to:
-/// - Detect when the source file has changed (via last_modified)
-/// - Quickly check if content is different (via content_hash)
-/// - Display human-readable paths (via relative_path)
-/// - Apply proper syntax highlighting (via language)
 #[derive(Debug, Clone)]
 pub struct CollectedFile {
-    pub path: PathBuf,              // Absolute path to the original file
-    pub relative_path: String,      // Human-readable relative path for display
-    pub content: String,            // The actual file content at collection time
-    pub language: String,           // Programming language for syntax highlighting
+    pub path: PathBuf,              // Absolute path to the file
+    pub relative_path: String,      // relative path for display
+    pub content: String,            // file content at collection time
+    pub language: String,           // language for syntax highlighting
     pub collected_at: SystemTime,   // When we collected this snapshot
-    pub content_hash: u64,          // Quick fingerprint for change detection
-    pub last_modified: SystemTime,  // File's modification time when collected
+    pub content_hash: u64,          // fingerprint for change detection
+    pub last_modified: SystemTime,  // Files modification time when collected
 }
 
 // Implementation of file collection operations
@@ -45,12 +39,12 @@ impl App {
     /// Add the currently selected file to the collection
     /// 
     /// This method handles several important scenarios:
-    /// - Validates that a file (not directory) is selected
+    /// - Validates that a file is selected
     /// - Checks file size and type safety before reading
     /// - Updates existing entries rather than creating duplicates
     /// - Provides detailed error messages for various failure modes
     pub fn add_current_file(&mut self) -> Result<(), AppError> {
-        // First, ensure we have a valid selection
+        // Make sure selection is valid and if it's not just give an error message
         let current_item = match self.current_selection() {
             Some(item) => item,
             None => {
@@ -59,20 +53,21 @@ impl App {
             }
         };
 
-        // Directories can't be collected - we only collect file contents
+        // Directories cant be collected -- only collect text file content
         if current_item.is_dir {
             self.set_error_message("Cannot collect directories".to_string());
             return Ok(());
         }
 
         // Try to create a CollectedFile from the selected item
-        // This is where we read the file and validate it's safe to collect
+        // will call `read_file_safely()` and act as a file filter as well
         let new_collected_file = match self.create_collected_file(current_item) {
             Ok(file) => file,
             Err(e) => {
-                // Transform technical errors into user-friendly messages
-                // Now using get_display_path() for cleaner error messages
+                // get the display path to help make the error cleaner
                 let display_name = self.get_display_path(&current_item.path);
+
+                // custom errors for the main possibilities then generic format for anything else
                 let error_message = match e {
                     AppError::FileTooLarge { size, max } => {
                         format!("{}: Too large ({} max: {})", 
@@ -100,17 +95,18 @@ impl App {
             }
         };
 
-        // Calculate size information for user feedback
+        // Calculate size information for display
         let size_kb = new_collected_file.content.len() / 1024;
-        // Use display path for cleaner messages
+
         let display_name = self.get_display_path(&current_item.path);
 
         // Check if this file is already in our collection
-        // This allows users to "refresh" a file by adding it again
+        // if it is already added we will use this info to refresh that collected item
         let existing_index = self.collected_files
             .iter()
             .position(|f| f.path == new_collected_file.path);
         
+        // Keep track of original vec length to use in messages (if changes occur)
         let old_count = self.collected_files.len();
 
         // Either update the existing entry or add a new one
@@ -119,7 +115,7 @@ impl App {
                 // Replace the old version with the new one
                 self.collected_files[index] = new_collected_file;
                 
-                // Build success message with size warning if applicable
+                // Build success message with size warning if we detect too much
                 let mut message = format!(
                     "Updated {} ({} KB) - Total: {} files",
                     display_name, size_kb, old_count
@@ -158,7 +154,7 @@ impl App {
     /// 
     /// This bulk operation is perfect for collecting all source files in a
     /// module or package. It intelligently:
-    /// - Skips directories and non-text files
+    /// - Skips directories and non text files
     /// - Updates files that are already in the collection
     /// - Provides a summary of what was added/updated/skipped
     /// - Warns when the collection size is getting large
@@ -290,7 +286,7 @@ impl App {
         
         if let Some(index) = index {
             // Remove the file from the collection
-            // swap_remove is O(1) but changes order - that's fine for us
+            // `swap_remove()`` is O(1) but changes order but we dont care about that
             let removed_file = self.collected_files.swap_remove(index);
             let size_kb = removed_file.content.len() / 1024;
             self.set_success_message(format!(

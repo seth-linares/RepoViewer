@@ -168,10 +168,7 @@ impl App {
         None
     }
 
-    /// Get the total size of the collection in bytes
-    pub fn get_collection_size(&self) -> usize {
-        self.collected_files.iter().map(|f| f.content.len()).sum()
-    }
+    
 
     /// Format a byte size into a human-readable string
     pub fn format_size(&self, bytes: usize) -> String {
@@ -190,15 +187,22 @@ impl App {
         }
     }
 
+    /// Get the total size of the collection in bytes
+    pub fn get_collection_size(&self) -> usize {
+        self.collected_files.iter().map(|f| f.content.len()).sum()
+    }
+
     /// Check collection size and return appropriate warning message
     /// This helps users avoid creating collections that are too large
     pub(super) fn get_size_warning(&self) -> Option<String> {
-        let size = self.get_collection_size();
+        
+        let size = self.get_collection_size(); // iterate over vec and get size in bytes
         
         // Define our warning thresholds
         const WARNING_THRESHOLD: usize = 25 * MEGABYTE;
         const CRITICAL_THRESHOLD: usize = 50 * MEGABYTE;
         
+        // Match general size and give feedback for how large the collection is becoming
         match size {
             s if s > CRITICAL_THRESHOLD => {
                 Some(format!(
@@ -218,12 +222,22 @@ impl App {
 
     /// Get a display-friendly path for status messages
     /// This provides shorter, more readable paths in the UI
+    /// 
+    /// Notes: 
+    ///     - If the file is directly in the current directory: shows just the filename ("file.txt")
+    ///     - If the file is in a subdirectory: shows "./subdir/file.txt"
+    ///     - If the file is outside the current directory: calculates a relative path ("../otherdir/file.txt")
+    ///     Fallback: shows the full path if relative path calculation fails
     pub fn get_display_path(&self, path: &Path) -> String {
-        // This method provides a shorter, more readable path for status messages
-        // It prioritizes showing the most relevant context
-        
+    
+        // So here we are trying to strip the absolute paths
+        // e.g.:
+        //    Current dir: "/home/user/project"
+        //    Input path:  "/home/user/project/src/main.rs"
+        //    Output:      "./src/main.rs"
         if let Ok(rel_path) = path.strip_prefix(&self.current_dir) {
-            // If file is in current directory, just show the filename
+            // If file is in current directory (strip leaves just names)
+            // then the path will just be the filename
             if rel_path.components().count() == 1 {
                 rel_path.to_string_lossy().to_string()
             } else {
@@ -239,6 +253,7 @@ impl App {
 
     /// Check if a file is already in the collection
     pub fn is_collected(&self, path: &Path) -> bool {
+        // iter through and see if there's a matching path
         self.collected_files.iter().any(|f| f.path == path)
     }
 
@@ -261,23 +276,26 @@ impl App {
 
     /// Check if a file is hidden (different on Windows than Linux)
     pub(super) fn is_hidden(&self, path: &Path, name: &str) -> bool {
-        // Windows: we need to check file metadata/attributes
+        // First, check if the file/directory name starts with a dot
+        // This is the Unix convention for hidden files
+        let is_dot_file = name.starts_with('.');
+        
+        // On Windows, we also need to check file attributes
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
             if let Ok(metadata) = path.metadata() {
                 let attributes = metadata.file_attributes();
+                // Windows hidden attribute is bit 2 (0x02)
                 if (attributes & 2) != 0 {
                     return true;
                 }
             }
         }
 
-        #[cfg(not(windows))]
         let _ = path;
-
-        // -- else AND for linux/unix we can just check for the `.` prefix 
-        name.starts_with('.')
+        // The file is hidden if it's a dot file
+        is_dot_file
     }
 
     /// Calculate relative path with better error handling
