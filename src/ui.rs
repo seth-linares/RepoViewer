@@ -26,13 +26,13 @@ impl UI {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(4),
+                    Constraint::Length(5), // Increased for breadcrumbs
                     Constraint::Min(5),
                     Constraint::Length(7), // Increased for contextual hints
                 ])
                 .split(frame.area());
 
-            Self::render_header(frame, app, chunks[0]);
+            Self::render_header_with_breadcrumbs(frame, app, chunks[0]);
             Self::render_file_list(frame, app, chunks[1]);
             Self::render_status_bar_with_hints(frame, app, chunks[2]);
             
@@ -43,13 +43,13 @@ impl UI {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(4),
+                    Constraint::Length(5), // Increased for breadcrumbs
                     Constraint::Min(5),
                     Constraint::Length(7), // Increased for contextual hints
                 ])
                 .split(frame.area());
 
-            Self::render_header(frame, app, chunks[0]);
+            Self::render_header_with_breadcrumbs(frame, app, chunks[0]);
             Self::render_file_list(frame, app, chunks[1]);
             Self::render_status_bar_with_hints(frame, app, chunks[2]);
         }
@@ -60,8 +60,8 @@ impl UI {
         }
     }
 
-    /// Renders the header section showing current directory and git info
-    fn render_header(frame: &mut Frame, app: &App, area: Rect) {
+    /// Enhanced header with breadcrumb navigation display
+    fn render_header_with_breadcrumbs(frame: &mut Frame, app: &App, area: Rect) {
         // Create the header block with borders and title
         let header_block = Block::default()
             .borders(Borders::ALL)
@@ -69,16 +69,53 @@ impl UI {
             .title_alignment(Alignment::Center)
             .style(Style::default().fg(Color::Cyan));
 
-        // Build the content lines
-        let path_display = format!("📁 {}", app.current_dir.display());
-        let mut lines: Vec<Line> = vec![Line::from(path_display)];
+        // Build the breadcrumb trail
+        let breadcrumbs = app.get_breadcrumbs();
+        let depth = app.get_current_depth();
+        
+        // Create breadcrumb display with separators
+        let mut breadcrumb_spans = Vec::new();
+        for (i, (name, _path)) in breadcrumbs.iter().enumerate() {
+            if i > 0 {
+                breadcrumb_spans.push(Span::raw(" > "));
+            }
+            
+            // Highlight the current directory
+            if i == breadcrumbs.len() - 1 {
+                breadcrumb_spans.push(Span::styled(
+                    name.clone(),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                ));
+            } else {
+                breadcrumb_spans.push(Span::styled(
+                    name.clone(),
+                    Style::default().fg(Color::Gray)
+                ));
+            }
+        }
+        
+        // Add depth indicator if we're deep in the tree
+        if depth > 0 {
+            breadcrumb_spans.push(Span::styled(
+                format!(" (depth: {})", depth),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+            ));
+        }
+
+        let mut lines: Vec<Line> = vec![Line::from(breadcrumb_spans)];
 
         // Add git root info if we're in a git repository
         if let Some(git_root) = &app.git_root {
-            lines.push(
+            let git_display = if app.current_dir == *git_root {
+                Line::from(vec![
+                    Span::raw("🔧 "),
+                    Span::styled("At git root", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                ])
+            } else {
                 Line::from(format!("🔧 Git root: {}", git_root.display()))
-                    .style(Style::default().fg(Color::Green).add_modifier(Modifier::DIM)),
-            );
+                    .style(Style::default().fg(Color::Green).add_modifier(Modifier::DIM))
+            };
+            lines.push(git_display);
         }
 
         // Add collection status
@@ -171,8 +208,6 @@ impl UI {
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 
-
-    
     /// Renders the status bar with keyboard shortcuts and toggle states
     fn render_status_bar_with_hints(frame: &mut Frame, app: &App, area: Rect) {
         // Split the status area into hint and controls sections
@@ -184,7 +219,7 @@ impl UI {
             ])
             .split(area);
         
-        // Render contextual hint if available
+        // Render contextual hint if available - now with navigation awareness
         if let Some(hint) = app.get_contextual_hint() {
             let hint_block = Block::default()
                 .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
@@ -202,23 +237,51 @@ impl UI {
             frame.render_widget(hint_paragraph, chunks[0]);
         }
         
+        // Check navigation capabilities
+        let can_go_up = app.can_navigate_up();
+        let can_go_into = app.can_navigate_into_selection();
+        let in_git_repo = app.git_root.is_some();
+        let at_start_dir = app.current_dir == app.start_dir;
+        
         // Render the regular status bar in the remaining space
-        // Update the controls to include help
         let controls = vec![
-            // Navigation controls
+            // Navigation controls - now with smart indicators
             Line::from(vec![
                 Span::styled("Navigate:", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" "),
                 Span::styled("↑↓", Style::default().fg(Color::Yellow)),
                 Span::raw(" Select  "),
-                Span::styled("←", Style::default().fg(Color::Yellow)),
+                
+                // Back arrow - gray out if can't go up
+                if can_go_up {
+                    Span::styled("←", Style::default().fg(Color::Yellow))
+                } else {
+                    Span::styled("←", Style::default().fg(Color::DarkGray))
+                },
                 Span::raw(" Back  "),
-                Span::styled("→/Enter", Style::default().fg(Color::Yellow)),
+                
+                // Forward navigation - gray out if not on a directory
+                if can_go_into {
+                    Span::styled("→/Enter", Style::default().fg(Color::Yellow))
+                } else {
+                    Span::styled("→/Enter", Style::default().fg(Color::DarkGray))
+                },
                 Span::raw(" Open  "),
-                Span::styled("Home/PgUp", Style::default().fg(Color::Yellow)),
-                Span::raw(" Top  "),
-                Span::styled("End/PgDn", Style::default().fg(Color::Yellow)),
-                Span::raw(" Bottom"),
+                
+                // Quick navigation
+                if !at_start_dir {
+                    Span::styled("~", Style::default().fg(Color::Yellow))
+                } else {
+                    Span::styled("~", Style::default().fg(Color::DarkGray))
+                },
+                Span::raw(" Start  "),
+                
+                if in_git_repo && app.git_root != Some(app.current_dir.clone()) {
+                    Span::styled("G", Style::default().fg(Color::Yellow))
+                } else {
+                    Span::styled("G", Style::default().fg(Color::DarkGray))
+                },
+                Span::raw(" Git"),
             ]),
             // Toggle controls
             Line::from(vec![
@@ -368,7 +431,7 @@ impl UI {
             area.height * 9 / 10,
         );
         
-        // Create the help content
+        // Create the help content - updated with new navigation shortcuts
         let help_text = vec![
             Line::from(vec![
                 Span::styled("RepoViewer Help", Style::default()
@@ -384,6 +447,8 @@ impl UI {
             Line::from("  →/Enter  Open selected directory"),
             Line::from("  PgUp     Jump to first item"),
             Line::from("  PgDn     Jump to last item"),
+            Line::from("  ~        Return to start directory"),
+            Line::from("  G        Jump to git repository root"),
             Line::from(""),
             Line::from(vec![
                 Span::styled("File Collection", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
@@ -412,10 +477,11 @@ impl UI {
                 Span::styled("Tips", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             ]),
             Line::from("  • Files marked with [+] are in your collection"),
+            Line::from("  • Breadcrumbs show your location from the start directory"),
+            Line::from("  • Navigation keys gray out when actions aren't available"),
             Line::from("  • Collection size is shown in the header with health indicators"),
             Line::from("  • Yellow warning at 25MB, red warning at 50MB"),
             Line::from("  • Refresh (r) updates modified files and removes deleted ones"),
-            Line::from("  • The tree export includes directory structure for AI context"),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Press '?' or ESC to close this help", 
