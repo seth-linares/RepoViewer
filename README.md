@@ -2,6 +2,9 @@
 
 A TUI file explorer for quickly gathering repo metadata and file content.
 
+<p style="text-align:center">
+    <img src="media/RepoViewer.gif" width="75%" />
+</p>
 
 ## Installation
 
