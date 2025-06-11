@@ -95,13 +95,26 @@ impl App {
             return Some("Press '?' or ESC to close help".to_string());
         }
         
+        // Navigation hints based on current location
+        if self.current_dir != self.start_dir && self.get_current_depth() > 3 {
+            return Some("Tip: Press '~' to quickly return to the start directory".to_string());
+        }
+        
+        if let Some(git_root) = &self.git_root {
+            if self.current_dir != *git_root && self.get_current_depth() > 2 {
+                return Some("Tip: Press 'G' to jump to the git repository root".to_string());
+            }
+        }
+        
         // New user hint - no files collected yet
         if self.collected_files.is_empty() {
             if let Some(item) = self.current_selection() {
                 if !item.is_dir {
                     return Some("Press 'a' to add this file to your collection".to_string());
-                } else {
+                } else if self.items.iter().any(|i| !i.is_dir) {
                     return Some("Press 'A' to add all files in this directory".to_string());
+                } else {
+                    return Some("Navigate into directories with → to find files to collect".to_string());
                 }
             }
             return Some("Navigate to files and press 'a' to start collecting".to_string());
@@ -129,6 +142,16 @@ impl App {
                     }
                 }
             }
+        }
+        
+        // Navigation-specific hints when in empty directories
+        if self.items.is_empty() {
+            return Some("Empty directory - press ← to go back".to_string());
+        }
+        
+        // Only directories hint
+        if self.items.iter().all(|i| i.is_dir) && !self.collected_files.is_empty() {
+            return Some("Only directories here - navigate deeper or press 'S' to save your collection".to_string());
         }
         
         // Collection ready hints
