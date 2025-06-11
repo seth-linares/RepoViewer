@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use app::App;  // Now importing from our app module
 use app_error::AppError;
 use clap::Parser;
 use crossterm::{
@@ -19,10 +20,6 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::{ui::UI, utils::parse_target_dir};
-
-
-
-
 
 /// RepoViewer - A TUI file explorer for generating directory trees for LLMs
 #[derive(Parser, Debug)]
@@ -75,7 +72,6 @@ fn main() -> Result<(), AppError> {
     run_tui(target_dir)
 }
 
-
 fn run_tui(target_dir: PathBuf) -> Result<(), AppError> {
     // Setup terminal 
     enable_raw_mode()?;
@@ -87,7 +83,7 @@ fn run_tui(target_dir: PathBuf) -> Result<(), AppError> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Initialize the app
+    // Initialize the app - no need for the extra import
     let mut app = App::new(target_dir)?;
 
     // Run the app
@@ -300,4 +296,3 @@ fn run_app<B: ratatui::backend::Backend>(
         }
     }
 }
-
