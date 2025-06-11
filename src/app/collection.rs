@@ -37,7 +37,6 @@ pub struct CollectedFile {
     pub language: String,           // Programming language for syntax highlighting
     pub collected_at: SystemTime,   // When we collected this snapshot
     pub content_hash: u64,          // Quick fingerprint for change detection
-    pub file_size: u64,             // Original file size in bytes
     pub last_modified: SystemTime,  // File's modification time when collected
 }
 
@@ -72,27 +71,29 @@ impl App {
             Ok(file) => file,
             Err(e) => {
                 // Transform technical errors into user-friendly messages
-                // This helps users understand why a file couldn't be collected
+                // Now using get_display_path() for cleaner error messages
+                let display_name = self.get_display_path(&current_item.path);
                 let error_message = match e {
                     AppError::FileTooLarge { size, max } => {
-                        format!("File too large: {} (max: {})", 
+                        format!("{}: Too large ({} max: {})", 
+                            display_name,
                             self.format_size(size as usize),
                             self.format_size(max)
                         )
                     },
                     AppError::BinaryFile => {
-                        "Cannot collect binary files - only text files are supported".to_string()
+                        format!("{}: Binary files cannot be collected", display_name)
                     },
                     AppError::UnrecognizedFileType { extension } => {
                         match extension {
-                            Some(ext) => format!("Unsupported file type: .{}", ext),
-                            None => "File has no extension - cannot determine type".to_string()
+                            Some(ext) => format!("{}: Unsupported type (.{})", display_name, ext),
+                            None => format!("{}: No file extension", display_name)
                         }
                     },
                     AppError::EncodingError => {
-                        "File has encoding issues - too many invalid UTF-8 characters".to_string()
+                        format!("{}: Too many invalid UTF-8 characters", display_name)
                     },
-                    _ => format!("Failed to read file: {}", e),
+                    _ => format!("{}: {}", display_name, e),
                 };
                 self.set_error_message(error_message);
                 return Ok(());
@@ -101,7 +102,8 @@ impl App {
 
         // Calculate size information for user feedback
         let size_kb = new_collected_file.content.len() / 1024;
-        let name = current_item.name.clone();
+        // Use display path for cleaner messages
+        let display_name = self.get_display_path(&current_item.path);
 
         // Check if this file is already in our collection
         // This allows users to "refresh" a file by adding it again
@@ -120,7 +122,7 @@ impl App {
                 // Build success message with size warning if applicable
                 let mut message = format!(
                     "Updated {} ({} KB) - Total: {} files",
-                    name, size_kb, old_count
+                    display_name, size_kb, old_count
                 );
                 
                 // Add warning if collection is getting large
@@ -137,7 +139,7 @@ impl App {
                 // Build success message with size warning if applicable
                 let mut message = format!(
                     "Added {} ({} KB) - Total: {} files",
-                    name, size_kb, old_count + 1
+                    display_name, size_kb, old_count + 1
                 );
                 
                 // Add warning if collection is getting large
@@ -165,6 +167,9 @@ impl App {
         let mut updated = 0;
         let mut skipped = 0;
         let mut errors = 0;
+        
+        // Keep track of problematic files for detailed reporting
+        let mut error_files: Vec<String> = Vec::new();
 
         // Store initial size to detect if we're crossing size thresholds
         let initial_size = self.get_collection_size();
@@ -188,8 +193,11 @@ impl App {
                     Err(AppError::NotAFile) => {
                         skipped += 1;
                     }
-                    Err(_) => {
+                    Err(e) => {
                         errors += 1;
+                        // Use display path for cleaner error tracking
+                        let display_name = self.get_display_path(&item.path);
+                        error_files.push(format!("{}: {}", display_name, e));
                     }
                 }
             } else {
@@ -202,8 +210,11 @@ impl App {
                     Err(AppError::NotAFile) => {
                         skipped += 1;
                     }
-                    Err(_) => {
+                    Err(e) => {
                         errors += 1;
+                        // Use display path for cleaner error tracking
+                        let display_name = self.get_display_path(&item.path);
+                        error_files.push(format!("{}: {}", display_name, e));
                     }
                 }
             }
@@ -219,6 +230,20 @@ impl App {
             "Added {} files, updated {}, skipped {} (errors: {}) - Total: {} files ({})",
             added, updated, skipped, errors, total, size_str
         );
+        
+        // If there were errors, add details about the first few
+        if !error_files.is_empty() {
+            let error_preview = error_files.iter()
+                .take(2)  // Show first 2 errors
+                .map(|e| e.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            
+            message.push_str(&format!("\nErrors: {}", error_preview));
+            if error_files.len() > 2 {
+                message.push_str(&format!(" and {} more", error_files.len() - 2));
+            }
+        }
         
         // Add size warning if we've crossed a threshold
         if let Some(warning) = self.get_size_warning() {
@@ -257,7 +282,8 @@ impl App {
 
         // Clone values to avoid borrowing issues with the iterator
         let path_to_remove = current_item.path.clone();
-        let name = current_item.name.clone();
+        // Use display path for cleaner messages
+        let display_name = self.get_display_path(&path_to_remove);
         
         // Find the file in our collection
         let index = self.collected_files.iter().position(|f| f.path == path_to_remove);
@@ -269,12 +295,12 @@ impl App {
             let size_kb = removed_file.content.len() / 1024;
             self.set_success_message(format!(
                 "Removed {} ({} KB) - Total: {} files",
-                name, size_kb, self.collected_files.len()
+                display_name, size_kb, self.collected_files.len()
             ));
         } else {
             self.set_error_message(format!(
                 "{} is not in the collection",
-                name
+                display_name
             ));
         }
 
@@ -369,8 +395,16 @@ impl App {
                 // Try to re-read the file with all our safety checks
                 match self.create_collected_file(&temp_item) {
                     Ok(new_file) => {
-                        self.collected_files[index] = new_file;
-                        Ok(RefreshResult::Updated)
+                        // Compare content hashes before declaring it modified
+                        if new_file.content_hash != self.collected_files[index].content_hash {
+                            self.collected_files[index] = new_file;
+                            Ok(RefreshResult::Updated)
+                        } else {
+                            // Timestamp changed but content didn't
+                            // Update just the timestamp to prevent repeated checks
+                            self.collected_files[index].last_modified = new_file.last_modified;
+                            Ok(RefreshResult::NoChange)
+                        }
                     }
                     Err(e) => Ok(RefreshResult::Failed(e.to_string())),
                 }
@@ -443,7 +477,6 @@ impl App {
         // This helps us validate the file and capture its state
         let metadata = fs::metadata(&item.path)?;
         let last_modified = metadata.modified()?;
-        let file_size = metadata.len();
         
         // Try to read the file content safely
         // This function handles size limits, binary detection, and encoding
@@ -472,7 +505,6 @@ impl App {
             language,
             collected_at: SystemTime::now(),
             content_hash,
-            file_size,
             last_modified,
         })
     }
