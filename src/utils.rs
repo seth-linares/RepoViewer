@@ -197,10 +197,10 @@ static FILE_MAPPINGS: LazyLock<HashMap<&'static str, (&'static str, Color)>> = L
     file_mappings
 });
 
-
+/// HERE IS WHERE YOU CAN MODIFY FILE TYPE COLORS
 pub fn get_file_display_info(item: &FileItem) -> (&str, Style) {
     let (icon, color) = if item.is_dir {
-        ("📁", Color::Blue)
+        ("📁", Color::Yellow)
     } else if item.is_symlink {
         ("🔗", Color::Magenta)
     } else {
@@ -210,14 +210,11 @@ pub fn get_file_display_info(item: &FileItem) -> (&str, Style) {
             .unwrap_or(("📄", Color::Gray))
     };
 
-    let mut style = if item.is_dir {
-        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-    } else if item.is_symlink {
-        Style::default().fg(Color::Magenta)
-    } else {
-        Style::default().fg(color)
-    };
-
+    let mut style = Style::default().fg(color);
+    
+    if item.is_dir {
+        style = style.add_modifier(Modifier::BOLD);
+    }
     if item.is_hidden {
         style = style.add_modifier(Modifier::DIM);
     }

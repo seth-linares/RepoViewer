@@ -215,13 +215,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                 // Perform the refresh operation
                                 let summary = app.refresh_all_collected();
                                 
-                                // Now we need to craft a meaningful message
-                                // Let's think about what users care about:
-                                // 1. Did anything change?
-                                // 2. What specifically changed?
-                                // 3. Were there any problems?
-                                
-                                // Case 1: Nothing changed at all - reassure the user
+                                // Case 1: Nothing changed at all
                                 if summary.updated == 0 && summary.deleted == 0 && 
                                 summary.failed == 0 && summary.inaccessible == 0 {
                                     app.set_success_message(format!(
@@ -229,7 +223,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                         summary.unchanged
                                     ));
                                 } 
-                                // Case 2: Changes occurred - detail what happened
+                                // Case 2: Changes occurred
                                 else {
                                     // Build a list of what changed
                                     let mut changes = Vec::new();
