@@ -9,6 +9,12 @@
 # 2. git tag -d v1.0.1-test
 
 
+# Make final release:
+# prerelease: true
+# ^^^^^^^^^^^^
+# TRUE = PRE-RELEASE, FALSE = RELEASE
+
+
 name: Release
 
 # Trigger on version tags
@@ -38,7 +44,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: RepoViewer ${{ github.ref_name }}
-          # Start with prerelease for testing, change to false for production
+          # TRUE = PRE-RELEASE, FALSE = RELEASE
           prerelease: true
           draft: false
           body: |
