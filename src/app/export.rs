@@ -255,6 +255,19 @@ impl App {
     /// 
     /// This provides a quick way to share project structure without
     /// having to save it to a file first.
+    
+    /// WE NEED TO FIX THE LIFETIME HANDLING
+    /// ```plaintext
+    ///     arboard, in debug builds, now attempts to call out clipboard lifetime mishandling.
+    ///         - This is a debugging feature, and as such has no absolute or promised behavior.
+    /// ```
+    /// 
+    /// Error I am recieving now:
+    /// ```plaintext
+    /// Clipboard was dropped very quickly after writing (1ms); clipboard managers may not have seen the contents
+    /// Consider keeping `Clipboard` in more persistent state somewhere or keeping the contents alive longer using `SetLinuxExt` and/or threads.
+    /// ```
+    /// 
     #[cfg(feature = "clipboard")]
     pub fn copy_tree_to_clipboard(&mut self) -> Result<(), AppError> {
         use arboard::Clipboard;

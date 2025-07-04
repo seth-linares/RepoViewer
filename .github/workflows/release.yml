@@ -56,23 +56,17 @@ jobs:
             - [Add other new features here]
             
             ## 📦 Installation
-            
-            ### Quick Install (Unix-like systems)
+
+            These releases are primarily for the self-updating feature. I would recommend using the command below to ensure the binary you run is
+            the same as the open and visible code you can see in this repo. Please don't download and run random binaries without knowing the source code.
             
             ```bash
-            # Download for your platform (example for Linux x64)
-            curl -L https://github.com/seth-linares/RepoViewer/releases/download/${{ github.ref_name }}/RepoViewer-${{ github.ref_name }}-x86_64-unknown-linux-gnu -o RepoViewer
-            chmod +x RepoViewer
-            sudo mv RepoViewer /usr/local/bin/
+            cargo install --git https://github.com/seth-linares/RepoViewer
             ```
-            
-            ### Windows
-            
-            Download the `.exe` file for your architecture and add it to your PATH.
             
             ## 🔄 Updating
             
-            If you have RepoViewer v2.1.0 or later installed:
+            If you have RepoViewer v2.0.0 or later installed:
             
             ```bash
             RepoViewer --update
