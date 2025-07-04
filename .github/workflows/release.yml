@@ -1,10 +1,13 @@
 # .github/workflows/release.yml
 #
-# This workflow automatically builds RepoViewer for multiple platforms and creates
-# a GitHub release whenever you push a version tag (e.g., v2.1.0).
+# To release: 
+# 1. git tag v1.0.1-test
+# 2. git push origin v1.0.1-test
 #
-# Since we're using rustls, we don't need any platform-specific SSL setup,
-# which makes this workflow much simpler and more reliable.
+# To delete release:
+# 1. git push --delete origin v1.0.1-test
+# 2. git tag -d v1.0.1-test
+
 
 name: Release
 
