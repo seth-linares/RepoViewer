@@ -1,26 +1,38 @@
 [package]
 name = "RepoViewer"
-version = "1.0.1"
-edition = "2024"
+version = "1.1.0"
+edition = "2021"
 authors = ["Seth Linares <sethlinares1@gmail.com>"]
 description = "A TUI file explorer for generating directory trees for LLMs"
 license = "MIT"
+repository = "https://github.com/seth-linares/RepoViewer"
+homepage = "https://github.com/seth-linares/RepoViewer"
+readme = "README.md"
+keywords = ["tui", "file-explorer", "llm", "directory-tree", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-clap = {version = "4.5.40", features = ["derive"]}
+clap = { version = "4.5.40", features = ["derive"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
-git2 = "0.20.2"
+
+# Configure `git2` without default features to avoid OpenSSL
+# because this only needs basic repository detection not network operations
+git2 = { version = "0.20.2", default-features = false }
+
 ignore = "0.4.23"
 ratatui = "0.29.0"
-self_update = "0.42.0"
-serde = "1.0.219"
+
+# Configure `self_update` to use `rustls` exclusively
+# to avoid OpenSSL as well and make sure we are more portable
+self_update = { version = "0.42.0", default-features = false, features = ["rustls", "archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate"] }
+
+serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
 tui-input = "0.12.1"
 
 # Optional clipboard support
 arboard = { version = "3.6.0", optional = true }
-
 
 [features]
 default = ["clipboard"]
@@ -29,3 +41,15 @@ clipboard = ["dep:arboard"]
 [[bin]]
 name = "RepoViewer"
 path = "src/main.rs"
+
+# Optimize release builds
+[profile.release]
+lto = true          # Enable Link Time Optimization
+opt-level = 3       # Maximum optimization
+codegen-units = 1   # Single codegen unit for better optimization
+strip = true        # Strip symbols for smaller binary
+panic = "abort"     # Smaller binary, no unwinding
+
+# Profile for faster development builds with some optimization
+[profile.dev]
+opt-level = 1       # Basic optimization for better TUI performance

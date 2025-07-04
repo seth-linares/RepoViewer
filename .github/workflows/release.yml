@@ -1,21 +1,25 @@
-# This workflow builds RepoViewer for multiple platforms and creates a release
-# It triggers when you push a tag starting with 'v' (e.g., v2.1.0)
+# .github/workflows/release.yml
+#
+# This workflow automatically builds RepoViewer for multiple platforms and creates
+# a GitHub release whenever you push a version tag (e.g., v2.1.0).
+#
+# Since we're using rustls, we don't need any platform-specific SSL setup,
+# which makes this workflow much simpler and more reliable.
+
 name: Release
 
-# The workflow runs when we push a version tag
-# This ensures releases are created only for official versions
+# Trigger on version tags
 on:
   push:
     tags:
-      - 'v*' # This matches tags like v2.1.0, v3.0.0-beta, etc.
+      - 'v*'
 
-# These permissions allow the workflow to create releases and upload files
+# Allow the workflow to create releases and upload assets
 permissions:
   contents: write
 
 jobs:
-  # First job: Create the GitHub release
-  # We do this first so we have a release to upload binaries to
+  # Job 1: Create the GitHub release that will host our binaries
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -31,86 +35,88 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: RepoViewer ${{ github.ref_name }}
-          # We'll make this a pre-release initially for testing
-          # Change to false when you're confident in the process
+          # Start with prerelease for testing, change to false for production
           prerelease: true
           draft: false
           body: |
             # RepoViewer ${{ github.ref_name }}
 
-            ## What's New
-            - Self-update functionality added! Run `RepoViewer --update` to update to the latest version.
+            ## 🎉 What's New
             
-            ## Installation
+            - Self-update functionality! Run `RepoViewer --update` to automatically update to the latest version
+            - [Add other new features here]
             
-            Download the appropriate binary for your platform below and make it executable.
+            ## 📦 Installation
             
             ### Quick Install (Unix-like systems)
+            
             ```bash
-            # Linux example
+            # Download for your platform (example for Linux x64)
             curl -L https://github.com/seth-linares/RepoViewer/releases/download/${{ github.ref_name }}/RepoViewer-${{ github.ref_name }}-x86_64-unknown-linux-gnu -o RepoViewer
             chmod +x RepoViewer
             sudo mv RepoViewer /usr/local/bin/
             ```
             
-            ## Updating
+            ### Windows
             
-            If you have v2.1.0 or later, simply run:
+            Download the `.exe` file for your architecture and add it to your PATH.
+            
+            ## 🔄 Updating
+            
+            If you have RepoViewer v2.1.0 or later installed:
+            
             ```bash
             RepoViewer --update
             ```
+            
+            ## 📋 Checksums
+            
+            SHA256 checksums are available in `checksums.txt` for verification.
 
-    # This output will be used by the build jobs to know where to upload binaries
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
 
-  # Second job: Build for multiple platforms
-  # This job runs multiple times in parallel, once for each platform
+  # Job 2: Build binaries for each platform
   build-and-upload:
     name: Build and Upload
-    needs: create-release # Wait for release to be created first
+    needs: create-release
     strategy:
       matrix:
         include:
-          # Windows build configuration
+          # Windows x64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary_name: RepoViewer.exe
-            # Note: Windows uses .exe extension
+            name: Windows x64
 
-          # Linux build configuration
+          # Linux x64 (most common)
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary_name: RepoViewer
-            # Linux binaries don't have an extension
+            name: Linux x64
 
-          # macOS Intel build configuration
+          # macOS Intel
           - target: x86_64-apple-darwin
             os: macos-latest
-            binary_name: RepoViewer
+            name: macOS Intel
 
-          # macOS Apple Silicon build configuration
-          # Note: We can cross-compile this from an Intel Mac
+          # macOS Apple Silicon (ARM64)
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary_name: RepoViewer
+            name: macOS Apple Silicon
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      # Check out the repository code
+      # Get the code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Rust toolchain
-      # We use stable Rust and add the target for cross-compilation
+      # Install Rust with the specific target
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # Cache Rust dependencies to speed up builds
-      # This can significantly reduce build time on subsequent runs
+      # Cache dependencies for faster builds
       - name: Cache Rust dependencies
         uses: actions/cache@v3
         with:
@@ -118,104 +124,119 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          # Create a unique cache key based on OS, target, and lock file
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
-      # Build the binary in release mode
-      # This creates an optimized binary suitable for distribution
+      # Build the binary
+      # The --locked flag ensures we use exact versions from Cargo.lock
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
-      # Prepare the binary for upload
-      # We need to rename it according to our naming convention
+      # Prepare the binary with the correct name for self_update
       - name: Prepare binary
         shell: bash
         run: |
-          # Navigate to where Cargo puts the built binary
+          # Navigate to the output directory
           cd target/${{ matrix.target }}/release
           
-          # On Windows, the binary has .exe extension
+          # Determine the binary name based on platform
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             BINARY_NAME="RepoViewer.exe"
-          else
-            BINARY_NAME="RepoViewer"
-          fi
-          
-          # Create the final name: RepoViewer-{version}-{target}[.exe]
-          # For example: RepoViewer-v2.1.0-x86_64-unknown-linux-gnu
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             FINAL_NAME="RepoViewer-${{ github.ref_name }}-${{ matrix.target }}.exe"
           else
+            BINARY_NAME="RepoViewer"
             FINAL_NAME="RepoViewer-${{ github.ref_name }}-${{ matrix.target }}"
           fi
           
-          # Rename the binary
+          # Rename and prepare for upload
           mv "$BINARY_NAME" "$FINAL_NAME"
-          
-          # Make it executable (important for Unix-like systems)
           chmod +x "$FINAL_NAME"
           
-          # Move to workspace root for easier upload
+          # Move to workspace root
           mv "$FINAL_NAME" "${{ github.workspace }}/"
           
-          # Store the final name for the upload step
+          # Save the final name for upload
           echo "ASSET_NAME=$FINAL_NAME" >> $GITHUB_ENV
+          
+          # Also save for checksum generation
+          echo "$FINAL_NAME" >> "${{ github.workspace }}/built_binaries.txt"
 
       # Upload the binary to the release
-      # This makes it available for download and for self_update to fetch
-
-      
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          # ASSET_NAME already defined in the above step ("Prepare binary") ^^^^^
-          asset_path: ./${{ env.ASSET_NAME }} 
+          # We define ASSET_NAME above so ignore this
+          asset_path: ./${{ env.ASSET_NAME }}
           asset_name: ${{ env.ASSET_NAME }}
-          # Set appropriate content type based on platform
           asset_content_type: ${{ matrix.os == 'windows-latest' && 'application/vnd.microsoft.portable-executable' || 'application/octet-stream' }}
 
-  # Optional: Build and upload checksums for security
-  checksums:
+  # Job 3: Generate checksums for security verification
+  generate-checksums:
     name: Generate Checksums
     needs: [create-release, build-and-upload]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Setup checksum generation
         run: |
-          # Create a directory for downloads
           mkdir -p downloads
+          echo "Starting checksum generation for RepoViewer ${{ github.ref_name }}"
+
+      - name: Download release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get release data from GitHub API
+          RELEASE_ID=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
+            | jq -r '.id')
+          
+          # Download each RepoViewer binary
+          curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets" \
+            | jq -r '.[] | select(.name | startswith("RepoViewer-")) | .url' \
+            | while read -r url; do
+                # Extract filename from the API response
+                FILENAME=$(curl -s \
+                  -H "Authorization: token $GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "$url" | jq -r '.name')
+                
+                echo "Downloading $FILENAME..."
+                curl -L \
+                  -H "Authorization: token $GITHUB_TOKEN" \
+                  -H "Accept: application/octet-stream" \
+                  "$url" \
+                  -o "downloads/$FILENAME"
+              done
+
+      - name: Generate checksums
+        run: |
           cd downloads
-          
-          # Download all binaries from the release
-          # We use the GitHub API to get the release assets
-          RELEASE_DATA=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }})
-          
-          # Extract download URLs and download each binary
-          echo "$RELEASE_DATA" | jq -r '.assets[].browser_download_url' | while read -r url; do
-            if [[ $url == *"RepoViewer-"* ]]; then
-              echo "Downloading $(basename "$url")..."
-              curl -L -O "$url"
-            fi
-          done
           
           # Generate SHA256 checksums
           sha256sum RepoViewer-* > checksums.txt
           
-          # Display checksums for verification
+          # Display for verification
           echo "Generated checksums:"
           cat checksums.txt
+          
+          # Move to workspace root
+          mv checksums.txt ../
 
-      - name: Upload Checksums
+      - name: Upload checksums
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./downloads/checksums.txt
+          asset_path: ./checksums.txt
           asset_name: checksums.txt
           asset_content_type: text/plain
