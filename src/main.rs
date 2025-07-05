@@ -2,6 +2,7 @@ mod app;
 mod utils;
 mod app_error;
 mod ui;
+mod clipboard;
 
 use std::{
     io::stdout,
@@ -9,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use app::App;  // Now importing from our app module
+use app::App;
 use app_error::AppError;
 use clap::Parser;
 use crossterm::{
@@ -177,8 +178,8 @@ fn run_app<B: ratatui::backend::Backend>(
                         // Copy tree to clipboard
                         KeyCode::Char('c') => {
                             match app.copy_tree_to_clipboard() {
-                                Ok(_) => app.set_success_message("Tree copied to clipboard!".to_string()),
-                                Err(e) => app.set_error_message(format!("Clipboard error: {}", e)),
+                                Ok(_) => {}, // Success message is set inside the method
+                                Err(e) => app.set_error_message(e.user_friendly_message()),
                             }
                         }
 
@@ -267,7 +268,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         // Copy collection to clipboard
                         KeyCode::Char('C') => {
                             if let Err(e) = app.copy_collection_to_clipboard() {
-                                app.set_error_message(format!("Clipboard error: {}", e));
+                                app.set_error_message(e.user_friendly_message());
                             }
                         },
 
