@@ -6,6 +6,7 @@
 
 use super::App;
 use crate::app_error::AppError;
+use crate::clipboard::ClipboardManager;
 use std::{
     fs,
     path::Path,
@@ -119,28 +120,15 @@ impl App {
         let size_str = self.format_size(markdown.len());
         let file_count = self.collected_files.len();
         
-        // Handle clipboard operations with feature flag
-        // This allows the crate to compile without clipboard support if needed
-        #[cfg(feature = "clipboard")]
-        {
-            use arboard::Clipboard;
-            // Create a new clipboard context for this operation
-            Clipboard::new()?.set_text(markdown)?;
-            
-            // Provide detailed success feedback so users know what was copied
-            self.set_success_message(format!(
-                "Copied {} files ({}) to clipboard!",
-                file_count,
-                size_str
-            ));
-        }
+        // Use our new clipboard manager for proper lifetime handling
+        ClipboardManager::set_text(markdown)?;
         
-        #[cfg(not(feature = "clipboard"))]
-        {
-            return Err(AppError::UnsupportedOperation(
-                "Clipboard support not compiled. Use --features clipboard".to_string(),
-            ));
-        }
+        // Provide detailed success feedback so users know what was copied
+        self.set_success_message(format!(
+            "Copied {} files ({}) to clipboard!",
+            file_count,
+            size_str
+        ));
         
         Ok(())
     }
@@ -255,30 +243,15 @@ impl App {
     /// 
     /// This provides a quick way to share project structure without
     /// having to save it to a file first.
-    
-    /// WE NEED TO FIX THE LIFETIME HANDLING
-    /// ```plaintext
-    ///     arboard, in debug builds, now attempts to call out clipboard lifetime mishandling.
-    ///         - This is a debugging feature, and as such has no absolute or promised behavior.
-    /// ```
-    /// 
-    /// Error I am recieving now:
-    /// ```plaintext
-    /// Clipboard was dropped very quickly after writing (1ms); clipboard managers may not have seen the contents
-    /// Consider keeping `Clipboard` in more persistent state somewhere or keeping the contents alive longer using `SetLinuxExt` and/or threads.
-    /// ```
-    /// 
-    #[cfg(feature = "clipboard")]
     pub fn copy_tree_to_clipboard(&mut self) -> Result<(), AppError> {
-        use arboard::Clipboard;
-
         let tree = self.generate_tree(None)?;
         
         // Calculate the size for better user feedback
         let size_str = self.format_size(tree.len());
         
-        Clipboard::new()?
-            .set_text(tree)?;
+        // Use our new clipboard manager with retry logic
+        // This handles busy clipboard scenarios gracefully
+        ClipboardManager::set_text(tree)?;
         
         // Provide informative success message
         self.set_success_message(format!(
@@ -287,13 +260,5 @@ impl App {
         ));
 
         Ok(())
-    }
-
-    /// Fallback implementation when clipboard feature is disabled
-    #[cfg(not(feature = "clipboard"))]
-    pub fn copy_tree_to_clipboard(&self) -> Result<(), AppError> {
-        Err(AppError::UnsupportedOperation(
-            "Clipboard support not compiled. Use --features clipboard".to_string(),
-        ))
     }
 }
