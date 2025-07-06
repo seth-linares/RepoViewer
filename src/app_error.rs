@@ -1,6 +1,6 @@
 // src/app_error.rs
 
-use std::{io, path::Path, sync::PoisonError};
+use std::{io, path::Path};
 use thiserror::Error;
 
 /// Custom error types for the application
@@ -27,10 +27,6 @@ pub enum AppError {
     #[error("Clipboard error: {0}")]
     Clipboard(#[from] arboard::Error),
 
-    /// Synchronization errors (mutex poisoning)
-    #[error("Synchronization error: {0}")]
-    SyncError(String),
-
     // --- Self-update related errors ---
 
     /// Wrap all self_update crate errors
@@ -43,24 +39,11 @@ pub enum AppError {
     #[error("Update cancelled by user")]
     UpdateCancelled,
 
-    /// No update available (not really an error, but useful for control flow)
-    #[error("Already running the latest version")]
-    NoUpdateAvailable,
-
-    /// Update cache-related errors that aren't covered by IO errors
-    #[error("Update cache error: {0}")]
-    UpdateCache(String),
-
     /// Platform-specific update errors
     #[error("Update not supported on this platform: {0}")]
     UnsupportedPlatform(String),
 
-    /// Errors related to version parsing or comparison
-    /// (beyond what semver provides)
-    #[error("Version error: {0}")]
-    VersionError(String),
-
-    // --- Application-specific errors (unchanged) ---
+    // --- Application-specific errors ---
 
     /// Failed to convert from FileItem to CollectionItem
     #[error("The FileItem is a directory and cannot be collected")]
@@ -94,10 +77,6 @@ pub enum AppError {
     #[error("Git repository does not have a parent")]
     GitRepoNoParent,
 
-    #[cfg(feature = "clipboard")]
-    #[error("Clipboard not initialized")]
-    ClipboardNotInitialized,
-
     /// A catch-all for other specific errors in your application logic
     #[error("Application logic error: {0}")]
     LogicError(String),
@@ -106,15 +85,6 @@ pub enum AppError {
     #[cfg(not(feature = "clipboard"))]
     #[error("Unsupported operation: {0}")]
     UnsupportedOperation(String),
-}
-
-// Generic implementation for any PoisonError
-// We can't use thiserror since we need a generic for PoisonError
-// (could make a struct and do weird conversions, but it's not worth)
-impl<T> From<PoisonError<T>> for AppError {
-    fn from(err: PoisonError<T>) -> Self {
-        AppError::SyncError(format!("Mutex poisoned: {}", err))
-    }
 }
 
 impl AppError {
@@ -131,48 +101,42 @@ impl AppError {
         }
     }
 
-    /// Helper to check if this is a network-related error
-    /// Useful for update operations to provide better user feedback
-    pub fn is_network_error(&self) -> bool {
-        match self {
-            AppError::SelfUpdate(self_update::errors::Error::Network(_)) => true,
-            AppError::SelfUpdate(self_update::errors::Error::Reqwest(_)) => true,
-            AppError::Io(e) if e.kind() == io::ErrorKind::NetworkUnreachable => true,
-            AppError::Io(e) if e.kind() == io::ErrorKind::ConnectionRefused => true,
-            _ => false,
-        }
-    }
-
-    /// Helper to determine if the error is related to permissions
-    /// Common when trying to update the executable
-    pub fn is_permission_error(&self) -> bool {
-        match self {
-            AppError::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => true,
-            AppError::SelfUpdate(self_update::errors::Error::Io(e)) 
-                if e.kind() == io::ErrorKind::PermissionDenied => true,
-            _ => false,
-        }
-    }
-
     /// Convert update errors to user-friendly messages
     /// This helps maintain consistent messaging across the app
     pub fn user_friendly_message(&self) -> String {
         match self {
             AppError::SelfUpdate(e) => match e {
-                self_update::errors::Error::Network(_) => 
-                    "Unable to check for updates: No internet connection".to_string(),
-                self_update::errors::Error::Release(msg) => 
-                    format!("Update check failed: {}", msg),
+                self_update::errors::Error::Network(msg) => {
+                    // Check for specific network errors
+                    if msg.contains("404") {
+                        "No releases found. This might be the first release or the repository might not have any releases yet.\n".to_string()
+                    } else if msg.contains("rate limit") {
+                        "GitHub API rate limit exceeded. Please try again later.".to_string()
+                    } else if msg.contains("timeout") {
+                        "Connection timed out. Please check your internet connection and try again.".to_string()
+                    } else if msg.contains("api.github.com") {
+                        "Unable to connect to GitHub. Please check your internet connection.".to_string()
+                    } else {
+                        "Network error while checking for updates. Please try again later.".to_string()
+                    }
+                },
+                self_update::errors::Error::Release(msg) => {
+                    if msg.contains("No releases") {
+                        "No releases available yet.".to_string()
+                    } else {
+                        format!("Update check failed: {}", msg)
+                    }
+                },
                 self_update::errors::Error::Io(io_err) if io_err.kind() == io::ErrorKind::PermissionDenied => 
-                    "Update failed: Permission denied. Try running with elevated permissions".to_string(),
+                    "Update failed: Permission denied. Try running with elevated permissions.".to_string(),
+                self_update::errors::Error::Reqwest(req_err) => {
+                    format!("HTTP error while checking for updates: {}", req_err)
+                },
                 _ => format!("Update error: {}", e),
             },
             AppError::UpdateCancelled => "Update cancelled".to_string(),
-            AppError::NoUpdateAvailable => "You're already running the latest version!".to_string(),
             AppError::UnsupportedPlatform(platform) => 
                 format!("Updates not available for {} - please build from source", platform),
-            AppError::SyncError(msg) => 
-                format!("Internal synchronization error: {}. This is likely a bug - please restart the application", msg),
             #[cfg(feature = "clipboard")]
             AppError::Clipboard(e) => match e {
                 arboard::Error::ContentNotAvailable => 
@@ -189,22 +153,5 @@ impl AppError {
             },
             _ => self.to_string(),
         }
-    }
-
-    /// Helper to determine if this is a temporary clipboard error that could be retried
-    #[cfg(feature = "clipboard")]
-    pub fn is_clipboard_busy(&self) -> bool {
-        matches!(self, AppError::Clipboard(arboard::Error::ClipboardOccupied))
-    }
-
-    /// Helper to check if clipboard operation failed due to unsupported feature
-    #[cfg(feature = "clipboard")]
-    pub fn is_clipboard_unsupported(&self) -> bool {
-        matches!(self, AppError::Clipboard(arboard::Error::ClipboardNotSupported))
-    }
-
-    /// Helper to check if this is a synchronization error
-    pub fn is_sync_error(&self) -> bool {
-        matches!(self, AppError::SyncError(_))
     }
 }

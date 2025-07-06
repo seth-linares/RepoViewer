@@ -3,6 +3,7 @@ mod utils;
 mod app_error;
 mod ui;
 mod clipboard;
+mod update;
 
 use std::{
     io::stdout,
@@ -25,7 +26,7 @@ use crate::{ui::UI, utils::parse_target_dir};
 /// RepoViewer - A TUI file explorer for generating directory trees for LLMs
 #[derive(Parser, Debug)]
 #[command(name = "repoviewer")]
-#[command(version, about, long_about = None)]
+#[command(about, long_about = None)]
 struct Args {
     /// Target directory (default: current directory)
     path: Option<String>,
@@ -45,11 +46,52 @@ struct Args {
     /// Show gitignored files in tree output
     #[arg(long)]
     all: bool,
+
+    /// Check for updates without installing
+    #[arg(long)]
+    check_update: bool,
+    
+    /// Update to the latest version
+    #[arg(long)]
+    update: bool,
+    
+    /// Don't prompt for confirmation during update
+    #[arg(long, requires = "update")]
+    yes: bool,
+    
+    /// Show current version and exit
+    #[arg(short = 'V', long)]
+    version: bool,
 }
 
-fn main() -> Result<(), AppError> {
+fn main() {
+    let result = run();
+    if let Err(e) = result {
+        eprintln!("Error: {}", e.user_friendly_message());
+        std::process::exit(1);
+    }
+}
+
+
+fn run() -> Result<(), AppError> {
     let args = Args::parse();
 
+    // Verioning/updating flags !!!!
+    if args.version {
+        update::show_version_info();
+        return Ok(());
+    }
+
+    if args.check_update {
+        return update::check_for_updates();
+    }
+
+    if args.update {
+        return update::perform_update(args.yes);
+    }
+
+    
+    // If no update related flags proceed with normal operation
     let target_dir = parse_target_dir(args.path)?;
 
     // If tree flag is set generate and exit
