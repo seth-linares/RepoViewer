@@ -7,13 +7,11 @@
 # To delete release:
 # 1. git push --delete origin v1.0.1-test
 # 2. git tag -d v1.0.1-test
-
-
+#
 # Make final release:
 # prerelease: true
 # ^^^^^^^^^^^^
 # TRUE = PRE-RELEASE, FALSE = RELEASE
-
 
 name: Release
 
@@ -32,21 +30,21 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: RepoViewer ${{ github.ref_name }}
-          # TRUE = PRE-RELEASE, FALSE = RELEASE
+          tag: ${{ github.ref_name }}
+          name: RepoViewer ${{ github.ref_name }}
           prerelease: true
           draft: false
+          generateReleaseNotes: false
           body: |
             # RepoViewer ${{ github.ref_name }}
 
@@ -66,22 +64,25 @@ jobs:
             
             ## 🔄 Updating
             
-            If you have RepoViewer v2.0.0 or later installed:
+            If you have RepoViewer with self-update support:
             
             ```bash
             RepoViewer --update
+            ```
+            
+            Or check for updates without installing:
+            
+            ```bash
+            RepoViewer --check-update
             ```
             
             ## 📋 Checksums
             
             SHA256 checksums are available in `checksums.txt` for verification.
 
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-
   # Job 2: Build binaries for each platform
   build-and-upload:
-    name: Build and Upload
+    name: Build and Upload - ${{ matrix.name }}
     needs: create-release
     strategy:
       matrix:
@@ -95,6 +96,12 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: Linux x64
+
+          # Linux ARM64 (AWS Graviton, Raspberry Pi 4/5)
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: Linux ARM64
+            use_cross: true
 
           # macOS Intel
           - target: x86_64-apple-darwin
@@ -131,10 +138,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
+      # Install cross if needed for cross-compilation
+      - name: Install cross
+        if: matrix.use_cross == true
+        run: |
+          # Download pre-built cross binary for faster installation
+          curl -L https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo mv cross /usr/local/bin/
+          cross --version
+
+      # Run tests (native platforms only)
+      - name: Run tests
+        if: matrix.use_cross != true
+        run: cargo test --target ${{ matrix.target }}
+
       # Build the binary
-      # The --locked flag ensures we use exact versions from Cargo.lock
+      # Use cross for targets that need cross-compilation, cargo for native
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: |
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            cross build --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+        shell: bash
 
       # Prepare the binary with the correct name for self_update
       - name: Prepare binary
@@ -152,6 +179,13 @@ jobs:
             FINAL_NAME="RepoViewer-${{ github.ref_name }}-${{ matrix.target }}"
           fi
           
+          # Verify binary exists
+          if [[ ! -f "$BINARY_NAME" ]]; then
+            echo "Error: Binary $BINARY_NAME not found!"
+            ls -la
+            exit 1
+          fi
+          
           # Rename and prepare for upload
           mv "$BINARY_NAME" "$FINAL_NAME"
           chmod +x "$FINAL_NAME"
@@ -162,20 +196,26 @@ jobs:
           # Save the final name for upload
           echo "ASSET_NAME=$FINAL_NAME" >> $GITHUB_ENV
           
-          # Also save for checksum generation
-          echo "$FINAL_NAME" >> "${{ github.workspace }}/built_binaries.txt"
+          # Verify the file was moved successfully
+          if [[ ! -f "${{ github.workspace }}/$FINAL_NAME" ]]; then
+            echo "Error: Failed to move binary to workspace!"
+            exit 1
+          fi
+          
+          echo "Binary prepared: $FINAL_NAME"
 
       # Upload the binary to the release
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ncipollo/release-action@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          # We define ASSET_NAME above so ignore this
-          asset_path: ./${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: ${{ matrix.os == 'windows-latest' && 'application/vnd.microsoft.portable-executable' || 'application/octet-stream' }}
+          allowUpdates: true
+          # ASSET_NAME DEFINED ABOVE^^^^^^^
+          artifacts: ${{ env.ASSET_NAME }}
+          artifactContentType: ${{ matrix.os == 'windows-latest' && 'application/vnd.microsoft.portable-executable' || 'application/octet-stream' }}
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          tag: ${{ github.ref_name }}
 
   # Job 3: Generate checksums for security verification
   generate-checksums:
@@ -198,6 +238,8 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
             | jq -r '.id')
+          
+          echo "Release ID: $RELEASE_ID"
           
           # Download each RepoViewer binary
           curl -s \
@@ -224,6 +266,13 @@ jobs:
         run: |
           cd downloads
           
+          # Verify we have files
+          if ! ls RepoViewer-* 1> /dev/null 2>&1; then
+            echo "Error: No RepoViewer binaries found!"
+            ls -la
+            exit 1
+          fi
+          
           # Generate SHA256 checksums
           sha256sum RepoViewer-* > checksums.txt
           
@@ -235,11 +284,12 @@ jobs:
           mv checksums.txt ../
 
       - name: Upload checksums
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ncipollo/release-action@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./checksums.txt
-          asset_name: checksums.txt
-          asset_content_type: text/plain
+          allowUpdates: true
+          artifacts: checksums.txt
+          artifactContentType: text/plain
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          tag: ${{ github.ref_name }}
