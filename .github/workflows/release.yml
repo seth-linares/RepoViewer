@@ -1,17 +1,13 @@
 # .github/workflows/release.yml
 #
 # To release: 
-# 1. git tag v1.0.1-test
-# 2. git push origin v1.0.1-test
+# 1. git tag v2.0.0
+# 2. git push origin v2.0.0
 #
 # To delete release:
-# 1. git push --delete origin v1.0.1-test
-# 2. git tag -d v1.0.1-test
-#
-# Make final release:
-# prerelease: true
-# ^^^^^^^^^^^^
-# TRUE = PRE-RELEASE, FALSE = RELEASE
+# 1. git push --delete origin v2.0.0
+# 2. git tag -d v2.0.0
+
 
 name: Release
 
@@ -36,49 +32,62 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Extract version-specific changelog section
+      - name: Extract Changelog
+        id: extract_changelog
+        run: |
+          # Get the version from the tag (remove 'v' prefix)
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
+          
+          # Extract the changelog section for this version
+          # This looks for the version heading and extracts until the next version or end
+          CHANGELOG_CONTENT=$(awk -v ver="## \\[$VERSION_NUM\\]" '
+            BEGIN { found=0; }
+            $0 ~ ver { found=1; next; }
+            found && /^## \[/ { exit; }
+            found { print; }
+          ' CHANGELOG.md)
+          
+          # If no specific version found, use a default message
+          if [ -z "$CHANGELOG_CONTENT" ]; then
+            CHANGELOG_CONTENT="No changelog entry found for version $VERSION_NUM. See CHANGELOG.md for details."
+          fi
+          
+          # Save to file to handle multi-line content
+          echo "$CHANGELOG_CONTENT" > changelog_excerpt.txt
+          
+          echo "Extracted changelog for version $VERSION_NUM"
+
       - name: Create Release
         id: create_release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: RepoViewer ${{ github.ref_name }}
-          prerelease: true
           draft: false
+          prerelease: false  # Explicitly set to false for regular releases
           generateReleaseNotes: false
+          bodyFile: changelog_excerpt.txt  # Use the extracted changelog
+          # Fallback body if bodyFile fails
           body: |
             # RepoViewer ${{ github.ref_name }}
-
-            ## 🎉 What's New
             
-            - Self-update functionality! Run `RepoViewer --update` to automatically update to the latest version
-            - [Add other new features here]
+            See [CHANGELOG.md](https://github.com/seth-linares/RepoViewer/blob/main/CHANGELOG.md) for details.
             
-            ## 📦 Installation
-
-            These releases are primarily for the self-updating feature. I would recommend using the command below to ensure the binary you run is
-            the same as the open and visible code you can see in this repo. Please don't download and run random binaries without knowing the source code.
+            ## Installation
             
             ```bash
             cargo install --git https://github.com/seth-linares/RepoViewer
             ```
             
-            ## 🔄 Updating
+            ## Updating
             
-            If you have RepoViewer with self-update support:
+            If you have RepoViewer 2.0.0 or later:
             
             ```bash
             RepoViewer --update
             ```
-            
-            Or check for updates without installing:
-            
-            ```bash
-            RepoViewer --check-update
-            ```
-            
-            ## 📋 Checksums
-            
-            SHA256 checksums are available in `checksums.txt` for verification.
 
   # Job 2: Build binaries for each platform
   build-and-upload:
@@ -214,7 +223,6 @@ jobs:
           artifactContentType: ${{ matrix.os == 'windows-latest' && 'application/vnd.microsoft.portable-executable' || 'application/octet-stream' }}
           omitBodyDuringUpdate: true
           omitNameDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
           tag: ${{ github.ref_name }}
 
   # Job 3: Generate checksums for security verification
@@ -291,5 +299,4 @@ jobs:
           artifactContentType: text/plain
           omitBodyDuringUpdate: true
           omitNameDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
           tag: ${{ github.ref_name }}
