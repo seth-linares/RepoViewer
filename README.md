@@ -6,13 +6,41 @@ A TUI file explorer for quickly gathering repo metadata and file content.
     <img src="media/RepoViewer.gif" />
 </p>
 
+## What's New in v2.0.0 🐈
+
+RepoViewer now updates itself! No more manually downloading new versions -- just run `RepoViewer --update` and you're good to go. I also fixed that annoying clipboard bug on Linux where your copied content would vanish into the void. Check out the [CHANGELOG](CHANGELOG.md) for all the details.
+
 ## Installation
+
+### The Easy Way
 
 ```bash
 cargo install --git https://github.com/seth-linares/RepoViewer
 ```
 
-Or if you want to clone and build it yourself:
+### Keeping Up to Date
+
+Once you have RepoViewer 2.0.0 or later, updating is super simple:
+
+```bash
+# Check if there's a new version
+RepoViewer --check-update
+
+# Update to the latest version
+RepoViewer --update
+```
+
+If you had 1.0.0 you need to force cargo to re-install so you can have a self-updating version:
+
+```bash
+   cargo install --git https://github.com/seth-linares/RepoViewer --force
+```
+
+The updater is smart enough to grab the right binary for your platform, and it'll show you a nice progress bar while downloading. If something goes wrong (like permission issues), it'll tell you exactly what to do.
+
+### Building from Source
+
+If you want to clone and build it yourself:
 
 ```bash
 git clone https://github.com/seth-linares/RepoViewer
@@ -89,13 +117,31 @@ I added some navigation shortcuts that I find myself using constantly:
 - `G` jumps to the git repository root (if you're in one)
 - PageUp/PageDown jump to the first/last item in the current directory
 
-### Command Line Tree Generation
+### Command Line Options
+
+#### Tree Generation
 
 If you just need a quick tree without the TUI:
 
 ```bash
 RepoViewer --tree
 RepoViewer --tree --depth 3 --hidden
+```
+
+#### Version and Updates
+
+```bash
+# Check your current version
+RepoViewer --version
+
+# See if there's a newer version available
+RepoViewer --check-update
+
+# Update to the latest version
+RepoViewer --update
+
+# Update without confirmation prompt
+RepoViewer --update --yes
 ```
 
 ## Why I made this
@@ -120,7 +166,9 @@ For file type detection, I maintain a whitelist of known text file extensions ra
 
 The tool respects `.gitignore` files when you're in a git repository, but you can toggle that behavior if needed. This keeps all the `node_modules`, `target`, and other build directories from cluttering up what you're trying to share.
 
+### Self-Updating
 
+The self-update feature (new in v2.0.0) uses GitHub releases to check for and download updates. It's built to be reliable -- it detects your platform automatically, verifies the download, and even keeps a backup of your current version just in case. If you're curious about the implementation, check out `update.rs`. The whole thing uses rustls instead of OpenSSL, so it works everywhere without extra dependencies.
 
 ## Contributing
 
@@ -129,9 +177,9 @@ Feel free to open issues or PRs! The codebase is organized into modules:
 - `ui.rs` - Terminal UI rendering  
 - `utils.rs` - File type detection and helpers
 - `main.rs` - CLI parsing and event loop
+- `update.rs` - Self-update functionality (new in v2.0.0)
+- `clipboard.rs` - Platform-specific clipboard handling
 
 The code has pretty extensive comments explaining the design decisions, especially in the collection module where most of the interesting logic lives.
 
 For people who want to modify the color scheme, you need to go into `utils.rs` and `ui.rs`. It's very easy to modify, you can look up "ratatui colors" on google and find some documentation if you need help, but it should be self-explanatory.
-
-
