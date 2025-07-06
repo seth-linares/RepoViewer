@@ -40,24 +40,26 @@ jobs:
           VERSION="${{ github.ref_name }}"
           VERSION_NUM="${VERSION#v}"
           
-          # Extract the changelog section for this version
-          # This looks for the version heading and extracts until the next version or end
-          CHANGELOG_CONTENT=$(awk -v ver="## \\[$VERSION_NUM\\]" '
-            BEGIN { found=0; }
-            $0 ~ ver { found=1; next; }
-            found && /^## \[/ { exit; }
-            found { print; }
-          ' CHANGELOG.md)
+          echo "Extracting changelog for version: $VERSION_NUM"
           
-          # If no specific version found, use a default message
-          if [ -z "$CHANGELOG_CONTENT" ]; then
-            CHANGELOG_CONTENT="No changelog entry found for version $VERSION_NUM. See CHANGELOG.md for details."
+          # Use sed to extract the changelog section (proven to work)
+          # This finds the version header and extracts everything until the next version header
+          CHANGELOG_CONTENT=$(sed -n "/^## \[$VERSION_NUM\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')
+          
+          # Check if we got content
+          if [ -n "$CHANGELOG_CONTENT" ]; then
+            echo "Successfully extracted $(echo "$CHANGELOG_CONTENT" | wc -l) lines of changelog"
+          else
+            echo "No changelog content found for version $VERSION_NUM"
+            CHANGELOG_CONTENT="See [CHANGELOG.md](https://github.com/seth-linares/RepoViewer/blob/main/CHANGELOG.md) for details about this release."
           fi
           
           # Save to file to handle multi-line content
           echo "$CHANGELOG_CONTENT" > changelog_excerpt.txt
           
-          echo "Extracted changelog for version $VERSION_NUM"
+          # Show first few lines for verification in logs
+          echo "First 5 lines of extracted changelog:"
+          head -5 changelog_excerpt.txt
 
       - name: Create Release
         id: create_release
@@ -69,25 +71,6 @@ jobs:
           prerelease: false  # Explicitly set to false for regular releases
           generateReleaseNotes: false
           bodyFile: changelog_excerpt.txt  # Use the extracted changelog
-          # Fallback body if bodyFile fails
-          body: |
-            # RepoViewer ${{ github.ref_name }}
-            
-            See [CHANGELOG.md](https://github.com/seth-linares/RepoViewer/blob/main/CHANGELOG.md) for details.
-            
-            ## Installation
-            
-            ```bash
-            cargo install --git https://github.com/seth-linares/RepoViewer
-            ```
-            
-            ## Updating
-            
-            If you have RepoViewer 2.0.0 or later:
-            
-            ```bash
-            RepoViewer --update
-            ```
 
   # Job 2: Build binaries for each platform
   build-and-upload:
