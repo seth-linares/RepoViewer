@@ -17,6 +17,7 @@ pub use disabled::*;
 pub mod enabled {
     use arboard::Clipboard;
     use crate::app_error::AppError;
+    #[cfg(target_os = "linux")]
     use std::thread;
 
 
