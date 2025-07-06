@@ -33,7 +33,7 @@ RepoViewer --update
 If you had 1.0.0 you need to force cargo to re-install so you can have a self-updating version:
 
 ```bash
-   cargo install --git https://github.com/seth-linares/RepoViewer --force
+cargo install --git https://github.com/seth-linares/RepoViewer --force
 ```
 
 The updater is smart enough to grab the right binary for your platform, and it'll show you a nice progress bar while downloading. If something goes wrong (like permission issues), it'll tell you exactly what to do.
