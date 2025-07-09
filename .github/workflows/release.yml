@@ -1,12 +1,12 @@
 # .github/workflows/release.yml
 #
 # To release: 
-# 1. git tag v2.0.0
-# 2. git push origin v2.0.0
+# 1. git tag v2.0.1
+# 2. git push origin v2.0.1
 #
 # To delete release:
-# 1. git push --delete origin v2.0.0
-# 2. git tag -d v2.0.0
+# 1. git push --delete origin v2.0.1
+# 2. git tag -d v2.0.1
 
 
 name: Release

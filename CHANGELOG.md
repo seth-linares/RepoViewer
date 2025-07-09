@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Performance optimizations (coming soon)
 
+## [2.0.1] - 2025-07-09
+
+### Fixed
+- **Rust Edition Update:** The project's Rust edition was updated from 2021 to **2024**.
+  - Previously, the project was incorrectly configured with the 2021 edition.
+  - This update ensures compatibility with the latest Rust features and best practices.
+
 ## [2.0.0] - 2025-07-06
 
 ### Added
